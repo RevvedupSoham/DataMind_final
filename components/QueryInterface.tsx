@@ -258,25 +258,61 @@ export function QueryInterface() {
           </div>
 
           <aside className="border-l border-ink-800 pl-0 lg:pl-7">
-            <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-ink-700">What happens next</p>
-            <ol className="mt-4 space-y-4">
-              {[
-                ["01", "Translate", "Groq drafts SQL"],
-                ["02", "Validate", "Safety + access checks"],
-                ["03", "Execute", "Real PostgreSQL"],
-                ["04", "Return", "Rows + visualization"],
-              ].map(([n, title, body]) => (
-                <li key={n} className="border-b border-ink-900 pb-4">
-                  <div className="flex gap-3">
-                    <span className="font-mono text-[9px] text-accent-400">{n}</span>
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-ink-300">{title}</p>
-                      <p className="mt-1 text-xs leading-5 text-ink-600">{body}</p>
+            {role === "member" ? (
+              <>
+                <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-ink-700">Member workspace</p>
+                <div className="mt-4 border-y border-ink-800 py-4">
+                  <p className="text-sm font-semibold text-ink-100">Your data, your scope.</p>
+                  <p className="mt-2 text-xs leading-5 text-ink-600">
+                    Personal employee data is scoped to the employee linked to your signed session.
+                    You can read your permitted information and approved general aggregates, but you cannot modify data.
+                  </p>
+                </div>
+                <div className="mt-5 space-y-3">
+                  {[
+                    ["01", "Personal", "My details, department, address"],
+                    ["02", "Compensation", "My current salary"],
+                    ["03", "History", "My permitted job history"],
+                    ["04", "General", "Approved department / workforce counts"],
+                  ].map(([n, title, body]) => (
+                    <div key={n} className="border-b border-ink-900 pb-3">
+                      <div className="flex gap-3">
+                        <span className="font-mono text-[9px] text-accent-400">{n}</span>
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-ink-300">{title}</p>
+                          <p className="mt-1 text-xs leading-5 text-ink-600">{body}</p>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </li>
-              ))}
-            </ol>
+                  ))}
+                </div>
+                <p className="mt-5 font-mono text-[9px] uppercase tracking-[0.16em] text-ink-700">
+                  READ ONLY / EMPLOYEE-SCOPED
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-ink-700">What happens next</p>
+                <ol className="mt-4 space-y-4">
+                  {[
+                    ["01", "Translate", "Groq drafts SQL"],
+                    ["02", "Validate", "Safety + access checks"],
+                    ["03", "Execute", "Real PostgreSQL"],
+                    ["04", "Return", "Rows + visualization"],
+                  ].map(([n, title, body]) => (
+                    <li key={n} className="border-b border-ink-900 pb-4">
+                      <div className="flex gap-3">
+                        <span className="font-mono text-[9px] text-accent-400">{n}</span>
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-ink-300">{title}</p>
+                          <p className="mt-1 text-xs leading-5 text-ink-600">{body}</p>
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              </>
+            )}
           </aside>
         </div>
 
