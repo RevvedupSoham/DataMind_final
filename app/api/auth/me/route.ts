@@ -16,5 +16,6 @@ export async function GET(req: NextRequest) {
     authenticated: true,
     username: session.username,
     role: session.role,
+    employeeId: session.employeeId,
   });
 }
