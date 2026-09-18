@@ -64,7 +64,9 @@ Every user account (admin or member) is mapped to an `employee_id` in the
 
 The session cookie carries `{username, role, employeeId}`, signed with
 HMAC-SHA256. Authorization decisions are made server-side using this verified
-employee context.
+employee context. The authorization rules are account-independent: any number
+of admin accounts (for example admin, admin1, admin2, etc.) can exist, and each
+admin receives the hierarchy belonging to that admin's mapped employee_id.
 
 ### Member Access Policies (POLICY 1, 2, 8)
 
@@ -93,6 +95,8 @@ employee context.
 **POLICY 3: Hierarchy-Based Individual Access**
 - Admin scope includes: self, direct reports, indirect reports (all depths)
 - Hierarchy is determined by `employee.manager_id → employee.id`
+- Each admin's scope is resolved from the signed session employee_id, never from
+  the username and never from a hardcoded administrator ID
 - Uses PostgreSQL recursive CTEs with cycle protection
 - Admin CANNOT access unrelated employees (even if same department)
 
@@ -137,6 +141,38 @@ Admin hierarchy traversal:
 - Cycle protection (malformed manager relationships won't cause infinite loops)
 - Implemented in `get_hierarchy(p_employee_id)` RPC function
 - Returns all employee IDs in the manager's reporting tree
+
+## Multi-account authorization behavior
+
+There is no single "admin employee" in DataMind. The mapping is per account:
+
+```
+admin1 -> admin_users.employee_id = 101 -> hierarchy(101)
+admin2 -> admin_users.employee_id = 205 -> hierarchy(205)
+admin3 -> admin_users.employee_id = 317 -> hierarchy(317)
+
+member1 -> member_users.employee_id = 401 -> own scope(401)
+member2 -> member_users.employee_id = 402 -> own scope(402)
+```
+
+The numbers above are illustrative only. DataMind never hardcodes them. At
+runtime the signed session supplies the authenticated employee_id, and the
+database verifies that the employee_id belongs to an account of the claimed
+role before authorizing the query.
+
+### Existing database
+
+If your database already has `admin_users` / `member_users` and working
+accounts, **do not rerun `auth_setup.sql`**, because that file creates those
+tables. Run the whole `auth_authorization_patch.sql` in Supabase SQL Editor
+instead. It preserves the existing accounts and upgrades the authorization
+functions.
+
+### Fresh database
+
+Run `setup.sql`, then `auth_setup.sql`, then `auth_authorization_patch.sql`.
+The final patch is intentionally applied after the base auth setup so fresh
+and existing installations use the same multi-account authorization behavior.
 
 ## Architecture
 
@@ -206,6 +242,11 @@ auth_setup.sql    One-time Supabase SQL:
                   - check_query_authorization(sql, role, employeeId)
                   - execute_authorized_sql with policy enforcement
                   - execute_privileged_sql with authorization
+
+auth_authorization_patch.sql
+                  Existing-DB hardening patch. Run this after auth_setup.sql
+                  to enable account-independent hierarchy validation for any
+                  number of admins/members without recreating auth tables.
 ```
 
 ## Security Architecture
