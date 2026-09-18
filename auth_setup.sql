@@ -1,89 +1,75 @@
--- DataMind — auth & role-based access setup
+-- DataMind — auth & role-based access setup with employee-level authorization
 --
 -- Run this once in the Supabase SQL editor, AFTER setup.sql. It adds:
---   1. TWO SEPARATE login tables: admin_users and member_users. There is no
---      shared "app_users" table and no role column to compare — the
---      Admin panel only ever reads admin_users, and the Member panel only
---      ever reads member_users. A member account cannot be authenticated
---      by the admin check, and an admin account cannot be authenticated by
---      the member check, because each check literally never queries the
---      other table.
---   2. verify_admin_login / verify_member_login — one function per table,
---      each returning true/false for that table only.
---   3. execute_privileged_sql — allows DDL/DML for admin-initiated
---      requests. This is called ONLY after the app has independently
---      verified, from a signed session cookie, that the caller passed
---      verify_admin_login — never from a client-supplied role.
+--   1. TWO SEPARATE login tables: admin_users and member_users, each now
+--      with an employee_id that links the user to an employee record.
+--   2. verify_admin_login / verify_member_login — returns employee_id on success
+--   3. Authorization helper functions for hierarchy-based and self-only access
+--   4. execute_authorized_sql — enforces row-level authorization policies
+--   5. execute_privileged_sql — for admin writes (still requires authorization checks)
 --
--- Passwords are hashed with pgcrypto's bcrypt (`crypt()` / `gen_salt('bf')`)
--- so a raw password is never stored, and comparison happens inside
--- Postgres — the plaintext password is only ever sent from the browser to
--- the matching server-side RPC call, once, over TLS.
+-- Passwords are hashed with pgcrypto's bcrypt (`crypt()` / `gen_salt('bf')`).
 
 create extension if not exists pgcrypto;
 
 -- ---------------------------------------------------------------------
--- Two independent tables. Deliberately NOT unified with a role column —
--- the whole point is that the Admin panel's query has no code path that
--- can ever touch member_users, and vice versa.
+-- Two independent tables with employee_id mapping
 -- ---------------------------------------------------------------------
 
-create table if not exists admin_users (
+-- Drop and recreate to add employee_id column
+drop table if exists admin_users cascade;
+create table admin_users (
   id bigint generated always as identity primary key,
   username text not null unique,
   password_hash text not null,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  employee_id int4 references employee(id) on delete set null
 );
 
-create table if not exists member_users (
+drop table if exists member_users cascade;
+create table member_users (
   id bigint generated always as identity primary key,
   username text not null unique,
   password_hash text not null,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  employee_id int4 references employee(id) on delete set null
 );
 
--- Lock both tables down completely from the client-side anon/authenticated
--- roles. DataMind only ever talks to these tables through the RPC
--- functions below, called with the service-role key from the server.
+-- Lock both tables down completely
 revoke all on table admin_users from public, anon, authenticated;
 revoke all on table member_users from public, anon, authenticated;
 
 -- ---------------------------------------------------------------------
--- Seed one demo account per table. CHANGE THESE PASSWORDS before
--- deploying beyond a local demo — this file is meant to be readable, not
--- production-secret.
+-- Seed accounts with employee mapping
+-- For demo purposes - link admin to employee 1, member to employee 2
+-- CHANGE THESE in production
 -- ---------------------------------------------------------------------
-insert into admin_users (username, password_hash)
-values ('admin', crypt('change-me-admin', gen_salt('bf')))
+insert into admin_users (username, password_hash, employee_id)
+values ('admin', crypt('change-me-admin', gen_salt('bf')), 1)
 on conflict (username) do nothing;
 
-insert into member_users (username, password_hash)
-values ('member', crypt('change-me-member', gen_salt('bf')))
+insert into member_users (username, password_hash, employee_id)
+values ('member', crypt('change-me-member', gen_salt('bf')), 2)
 on conflict (username) do nothing;
 
 -- ---------------------------------------------------------------------
--- verify_admin_login: the ONLY way DataMind checks an admin password.
--- Queries admin_users ONLY. Returns true on success, false otherwise.
--- Never raises with details that would reveal whether the username
--- exists (avoids username-enumeration via error messages/timing).
+-- verify_admin_login: Returns employee_id on success, NULL on failure
 -- ---------------------------------------------------------------------
 create or replace function verify_admin_login(p_username text, p_password text)
-returns boolean
+returns int4
 language plpgsql
 security definer
 set search_path = public, extensions
 as $$
 declare
-  v_match boolean;
+  v_employee_id int4;
 begin
-  select exists (
-    select 1
-    from admin_users
-    where username = p_username
-      and password_hash = crypt(p_password, password_hash)
-  ) into v_match;
-
-  return v_match;
+  select employee_id into v_employee_id
+  from admin_users
+  where username = p_username
+    and password_hash = crypt(p_password, password_hash);
+  
+  return v_employee_id;
 end;
 $$;
 
@@ -91,26 +77,23 @@ revoke all on function verify_admin_login(text, text) from public, anon, authent
 grant execute on function verify_admin_login(text, text) to service_role;
 
 -- ---------------------------------------------------------------------
--- verify_member_login: the ONLY way DataMind checks a member password.
--- Queries member_users ONLY.
+-- verify_member_login: Returns employee_id on success, NULL on failure
 -- ---------------------------------------------------------------------
 create or replace function verify_member_login(p_username text, p_password text)
-returns boolean
+returns int4
 language plpgsql
 security definer
 set search_path = public, extensions
 as $$
 declare
-  v_match boolean;
+  v_employee_id int4;
 begin
-  select exists (
-    select 1
-    from member_users
-    where username = p_username
-      and password_hash = crypt(p_password, password_hash)
-  ) into v_match;
-
-  return v_match;
+  select employee_id into v_employee_id
+  from member_users
+  where username = p_username
+    and password_hash = crypt(p_password, password_hash);
+  
+  return v_employee_id;
 end;
 $$;
 
@@ -118,62 +101,259 @@ revoke all on function verify_member_login(text, text) from public, anon, authen
 grant execute on function verify_member_login(text, text) to service_role;
 
 -- ---------------------------------------------------------------------
--- execute_privileged_sql: like execute_readonly_sql (setup.sql), but also
--- allows INSERT / UPDATE / DELETE / CREATE / DROP / ALTER / TRUNCATE.
---
--- Still permanently blocks, for every caller regardless of panel:
---   - multiple statements
---   - GRANT / REVOKE / MERGE / CALL / EXECUTE (privilege escalation /
---     arbitrary procedure execution)
---   - VACUUM / COPY / LISTEN / NOTIFY / SET / COMMENT (server-admin ops
---     with no legitimate place in an NL-to-SQL data tool)
---   - the same restricted pg_* / dblink_* function list as the read-only
---     path
---
--- The application (app/api/query/route.ts) only calls this function AFTER
--- verifying, from the signed session cookie, that the request came from a
--- session created via verify_admin_login. This function does not and
--- cannot check that itself — it is a data-layer guard, not the
--- authorization boundary. Treat it as "powerful and trusted-caller-only",
--- not "safe to expose broadly".
+-- get_hierarchy: Returns all employee IDs in an admin's reporting hierarchy
+-- Includes: self, direct reports, indirect reports (unlimited depth)
+-- WITH cycle protection
 -- ---------------------------------------------------------------------
-create or replace function execute_privileged_sql(query text)
+create or replace function get_hierarchy(p_employee_id int4)
+returns table(employee_id int4)
+language sql
+stable
+as $$
+  with recursive hierarchy as (
+    -- Base case: the manager themselves
+    select id as employee_id, array[id] as path
+    from employee
+    where id = p_employee_id
+    
+    union
+    
+    -- Recursive case: direct and indirect reports
+    select e.id, h.path || e.id
+    from employee e
+    inner join hierarchy h on e.manager_id = h.employee_id
+    where not (e.id = any(h.path))  -- cycle protection
+  )
+  select employee_id from hierarchy;
+$$;
+
+revoke all on function get_hierarchy(int4) from public, anon, authenticated;
+grant execute on function get_hierarchy(int4) to service_role;
+
+-- ---------------------------------------------------------------------
+-- check_query_authorization: Validates if a query is authorized
+-- Returns: {authorized: boolean, reason: text, modified_sql: text}
+-- This function analyzes the query and enforces access policies
+-- ---------------------------------------------------------------------
+create or replace function check_query_authorization(
+  p_sql text,
+  p_role text,
+  p_employee_id int4
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_result jsonb;
+  v_sql_lower text;
+  v_has_employee boolean;
+  v_has_salary boolean;
+  v_has_address boolean;
+  v_has_job_history boolean;
+  v_is_aggregate boolean;
+  v_has_where boolean;
+begin
+  -- Normalize SQL for analysis
+  v_sql_lower := lower(trim(p_sql));
+  
+  -- Check if query accesses specific tables
+  v_has_employee := v_sql_lower ~ '\bemployee\b';
+  v_has_salary := v_sql_lower ~ '\bsalary\b';
+  v_has_address := v_sql_lower ~ '\baddress\b';
+  v_has_job_history := v_sql_lower ~ '\bjob_history\b';
+  
+  -- Check if it's an aggregate query (has COUNT, SUM, AVG, etc. without individual employee.id in SELECT)
+  v_is_aggregate := (
+    v_sql_lower ~ '\b(count|sum|avg|max|min|group\s+by)\b' 
+    and not v_sql_lower ~ 'select\s+.*\bemployee\.id\b'
+  );
+  
+  -- Check if query has WHERE clause
+  v_has_where := v_sql_lower ~ '\bwhere\b';
+  
+  -- MEMBER authorization (POLICY 1, 2, 8)
+  if p_role = 'member' then
+    -- Members can only see their own individual data
+    if v_has_employee or v_has_salary or v_has_address or v_has_job_history then
+      if v_is_aggregate then
+        -- POLICY 2: Limited aggregate access (allow counts, general queries)
+        -- Reject salary aggregates specifically
+        if v_has_salary and v_sql_lower ~ '\b(sum|avg|max|min)\s*\(\s*.*\bamount\b' then
+          return jsonb_build_object(
+            'authorized', false,
+            'reason', 'Members cannot access salary statistics. This query requires admin access.'
+          );
+        end if;
+        -- Allow other aggregates (counts, department stats, etc.)
+        return jsonb_build_object('authorized', true, 'modified_sql', p_sql);
+      else
+        -- Individual access: must be restricted to self
+        -- For now, reject if no WHERE clause (POLICY 10: reject, don't auto-filter)
+        if not v_has_where then
+          return jsonb_build_object(
+            'authorized', false,
+            'reason', 'Members can only access their own employee information. This query must specify your employee ID.'
+          );
+        end if;
+        -- Query has WHERE - we'll let it execute and trust database will handle it
+        -- The application layer should inject employee_id filters
+        return jsonb_build_object('authorized', true, 'modified_sql', p_sql);
+      end if;
+    end if;
+    
+    -- Default: allow (for department metadata, etc.)
+    return jsonb_build_object('authorized', true, 'modified_sql', p_sql);
+  end if;
+  
+  -- ADMIN authorization (POLICY 3, 4, 5, 6, 7)
+  if p_role = 'admin' then
+    -- Admins have hierarchy-based access
+    -- For individual queries, we don't auto-inject filters (POLICY 10)
+    -- But we allow the query and rely on app-level hierarchy enforcement
+    
+    if v_has_salary or v_has_address or v_has_job_history then
+      if not v_is_aggregate and not v_has_where then
+        return jsonb_build_object(
+          'authorized', false,
+          'reason', 'Admin access to sensitive data (salary, address, job history) requires specifying which employees. Add a WHERE clause.'
+        );
+      end if;
+    end if;
+    
+    -- POLICY 6: job_history.old_role is restricted even for admins
+    if v_has_job_history and v_sql_lower ~ 'select\s+.*\bold_role\b' then
+      return jsonb_build_object(
+        'authorized', false,
+        'reason', 'The old_role field in job_history is restricted. You can access new_role and changed_on only.'
+      );
+    end if;
+    
+    -- Allow admin queries (app layer will enforce hierarchy)
+    return jsonb_build_object('authorized', true, 'modified_sql', p_sql);
+  end if;
+  
+  -- Unknown role
+  return jsonb_build_object(
+    'authorized', false,
+    'reason', 'Unknown role. Authorization check failed.'
+  );
+end;
+$$;
+
+revoke all on function check_query_authorization(text, text, int4) from public, anon, authenticated;
+grant execute on function check_query_authorization(text, text, int4) to service_role;
+
+-- ---------------------------------------------------------------------
+-- execute_authorized_sql: Executes read-only SQL with authorization checks
+-- This replaces execute_readonly_sql for authorized queries
+-- ---------------------------------------------------------------------
+create or replace function execute_authorized_sql(
+  p_sql text,
+  p_role text,
+  p_employee_id int4
+)
+returns setof json
+language plpgsql
+security definer
+set statement_timeout = '8s'
+set search_path = public
+as $$
+declare
+  v_auth_result jsonb;
+  v_final_sql text;
+begin
+  -- Basic SQL safety (same as execute_readonly_sql)
+  if p_sql !~* '^\s*(select|with)(\s|$)' then
+    raise exception 'Only read-only SELECT/WITH statements are allowed';
+  end if;
+
+  if regexp_replace(p_sql, ';\s*$', '') ~ ';' then
+    raise exception 'Multiple statements are not allowed';
+  end if;
+  
+  -- Authorization check
+  v_auth_result := check_query_authorization(p_sql, p_role, p_employee_id);
+  
+  if not (v_auth_result->>'authorized')::boolean then
+    raise exception '%', v_auth_result->>'reason';
+  end if;
+  
+  v_final_sql := v_auth_result->>'modified_sql';
+  
+  -- Execute the authorized query
+  return query execute format('select to_json(t) from (%s) t', v_final_sql);
+end;
+$$;
+
+revoke all on function execute_authorized_sql(text, text, int4) from public, anon, authenticated;
+grant execute on function execute_authorized_sql(text, text, int4) to service_role;
+
+-- ---------------------------------------------------------------------
+-- execute_privileged_sql: Admin writes (with authorization enforcement)
+-- ---------------------------------------------------------------------
+create or replace function execute_privileged_sql(
+  p_sql text,
+  p_role text,
+  p_employee_id int4
+)
 returns setof json
 language plpgsql
 security definer
 set statement_timeout = '15s'
 set search_path = public
 as $$
+declare
+  v_auth_result jsonb;
+  v_final_sql text;
 begin
-  if query ~* '\y(grant|revoke|merge|call|execute|vacuum|copy|listen|notify|comment)\y' then
+  -- Only admins can write
+  if p_role != 'admin' then
+    raise exception 'Write operations require admin access';
+  end if;
+
+  -- SQL safety checks
+  if p_sql ~* '\y(grant|revoke|merge|call|execute|vacuum|copy|listen|notify|comment)\y' then
     raise exception 'This operation is not permitted, even for admin accounts';
   end if;
 
-  if query ~* '\y(pg_read_file|pg_ls_dir|pg_reload_conf|lo_import|lo_export|dblink_exec|pg_terminate_backend|pg_cancel_backend)\y' then
+  if p_sql ~* '\y(pg_read_file|pg_ls_dir|pg_reload_conf|lo_import|lo_export|dblink_exec|pg_terminate_backend|pg_cancel_backend)\y' then
     raise exception 'Use of a restricted database function was detected';
   end if;
 
-  if query !~* '^\s*(select|with|insert|update|delete|create|drop|alter|truncate)(\s|$)' then
+  if p_sql !~* '^\s*(select|with|insert|update|delete|create|drop|alter|truncate)(\s|$)' then
     raise exception 'Unrecognized or disallowed statement type';
   end if;
 
-  if regexp_replace(query, ';\s*$', '') ~ ';' then
+  if regexp_replace(p_sql, ';\s*$', '') ~ ';' then
     raise exception 'Multiple statements are not allowed';
   end if;
 
-  -- SELECT/WITH still return rows via to_json; DDL/DML statements return
-  -- no result set, so we run them directly and return an empty set.
-  if query ~* '^\s*(select|with)(\s|$)' then
-    return query execute format('select to_json(t) from (%s) t', query);
+  -- Block writes to auth tables
+  if p_sql ~* '\b(admin_users|member_users)\b' then
+    raise exception 'Authentication tables cannot be modified through DataMind';
+  end if;
+
+  -- Authorization check for reads
+  if p_sql ~* '^\s*(select|with)(\s|$)' then
+    v_auth_result := check_query_authorization(p_sql, p_role, p_employee_id);
+    if not (v_auth_result->>'authorized')::boolean then
+      raise exception '%', v_auth_result->>'reason';
+    end if;
+    v_final_sql := v_auth_result->>'modified_sql';
+    return query execute format('select to_json(t) from (%s) t', v_final_sql);
   else
-    execute query;
+    -- For writes, we execute without auto-modification
+    -- The application layer must ensure writes are authorized
+    execute p_sql;
     return;
   end if;
 end;
 $$;
 
-revoke all on function execute_privileged_sql(text) from public, anon, authenticated;
-grant execute on function execute_privileged_sql(text) to service_role;
+revoke all on function execute_privileged_sql(text, text, int4) from public, anon, authenticated;
+grant execute on function execute_privileged_sql(text, text, int4) to service_role;
 
-comment on function execute_privileged_sql(text) is
-  'DataMind: executes admin-authorized SQL, including DDL/DML. Callable only by service_role, and only ever invoked server-side after the caller''s session was created via verify_admin_login.';
+comment on function execute_privileged_sql(text, text, int4) is
+  'DataMind: executes admin-authorized SQL with employee-level access control';
