@@ -297,18 +297,12 @@ begin
   is_read := s ~ '^\s*(select|with)(\s|$)';
   if is_read then
     -- Reads use the same per-account hierarchy authorization as the read RPC.
-    declare
-      read_auth jsonb;
-      read_sql text;
-    begin
-      read_auth := check_query_authorization(p_sql,'admin',p_employee_id);
-      if not coalesce((read_auth->>'authorized')::boolean,false) then
-        raise exception '%',read_auth->>'reason';
-      end if;
-      read_sql := read_auth->>'modified_sql';
-      return query execute format('select to_json(t) from (%s) t',read_sql);
-      return;
-    end;
+    read_auth := check_query_authorization(p_sql,'admin',p_employee_id);
+    if not coalesce((read_auth->>'authorized')::boolean,false) then
+      raise exception '%',read_auth->>'reason';
+    end if;
+    read_sql := read_auth->>'modified_sql';
+    return query execute format('select to_json(t) from (%s) t',read_sql);
   end if;
 
   if s ~ '^\s*(create|drop|alter|truncate)\M' then
