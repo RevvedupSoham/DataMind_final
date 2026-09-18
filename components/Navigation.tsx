@@ -10,6 +10,44 @@ const LINKS = [
   { href: "#examples", label: "Capabilities" },
 ];
 
+function ThemeToggle() {
+  const [light, setLight] = useState(false);
+
+  useEffect(() => {
+    const isLight = document.documentElement.classList.contains("theme-light");
+    setLight(isLight);
+  }, []);
+
+  function toggleTheme() {
+    const nextLight = !document.documentElement.classList.contains("theme-light");
+    document.documentElement.classList.toggle("theme-light", nextLight);
+    document.documentElement.style.colorScheme = nextLight ? "light" : "dark";
+    localStorage.setItem("datamind-theme", nextLight ? "light" : "dark");
+    setLight(nextLight);
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={toggleTheme}
+      aria-label={light ? "Switch to dark mode" : "Switch to light mode"}
+      title={light ? "Switch to dark mode" : "Switch to light mode"}
+      className="group grid h-9 w-9 place-items-center border border-ink-700 bg-ink-900/70 text-ink-400 transition-all hover:border-accent-400 hover:text-accent-400"
+    >
+      {light ? (
+        <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
+          <path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M15.3 4.7l-1.4 1.4M6.1 13.9l-1.4 1.4" strokeLinecap="round" />
+          <circle cx="10" cy="10" r="3.1" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
+          <path d="M15.7 12.8A6.1 6.1 0 0 1 7.2 4.3 6.2 6.2 0 1 0 15.7 12.8Z" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
 function UserMenu({
   session,
 }: {
@@ -157,7 +195,8 @@ export function Navigation() {
           ))}
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
+          <ThemeToggle />
           {session && <UserMenu session={session} />}
           <a
             href="#ask"
