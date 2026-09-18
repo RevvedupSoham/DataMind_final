@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { validateSql } from "@/lib/sql/validator";
-import { executePrivilegedQuery, DatabaseError } from "@/lib/database/supabase";
+import { executePrivilegedQuery, DatabaseError, AuthorizationError } from "@/lib/database/supabase";
 import { verifySessionToken, SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import type { QueryErrorResponse, QueryResponse } from "@/types/query";
 
@@ -21,6 +21,8 @@ function errorResponse(
  * executePrivilegedQuery, and it re-verifies both the session (must be
  * admin) and the SQL itself (via validateSql) rather than trusting the
  * client's copy of what /api/query originally returned.
+ * 
+ * Now also enforces employee-level authorization via employeeId.
  */
 export async function POST(req: NextRequest) {
   const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
@@ -31,6 +33,8 @@ export async function POST(req: NextRequest) {
   if (session.role !== "admin") {
     return errorResponse("auth", "Only admin accounts can confirm and run write statements.", 403);
   }
+
+  const { role, employeeId } = session;
 
   let body: unknown;
   try {
@@ -63,8 +67,12 @@ export async function POST(req: NextRequest) {
 
   let result;
   try {
-    result = await executePrivilegedQuery(validation.sql);
+    result = await executePrivilegedQuery(validation.sql, role, employeeId);
   } catch (err) {
+    if (err instanceof AuthorizationError) {
+      console.warn("[DataMind] Authorization error on write:", err.message);
+      return errorResponse("authorization", err.message, 403);
+    }
     if (err instanceof DatabaseError) {
       console.error("[DataMind] Privileged execution error:", err.message);
       return errorResponse("database", err.message, 502);
