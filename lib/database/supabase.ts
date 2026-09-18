@@ -208,6 +208,79 @@ export async function executePrivilegedQuery(
   };
 }
 
+
+/**
+ * Loads the authenticated employee's compact profile for the post-login
+ * workspace. The employeeId comes only from the verified server session.
+ */
+export async function getEmployeeProfile(employeeId: number) {
+  const client = getServiceClient();
+
+  const { data: employee, error: employeeError } = await client
+    .from("employee")
+    .select("id, name, hire_date, manager_id, dept_id")
+    .eq("id", employeeId)
+    .maybeSingle();
+
+  if (employeeError || !employee) {
+    console.error("[DataMind] Employee profile lookup failed:", employeeError?.message);
+    throw new DatabaseError("Could not load the authenticated employee profile.");
+  }
+
+  const [{ data: department }, { data: manager }, { data: address }, { data: salary }] =
+    await Promise.all([
+      client.from("department").select("id, name, location").eq("id", employee.dept_id).maybeSingle(),
+      employee.manager_id
+        ? client.from("employee").select("id, name").eq("id", employee.manager_id).maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+      client.from("address").select("city, state, pin_code").eq("employee_id", employeeId).maybeSingle(),
+      client
+        .from("salary")
+        .select("amount, currency, effective_from")
+        .eq("employee_id", employeeId)
+        .order("effective_from", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ]);
+
+  if (!department) {
+    throw new DatabaseError("Could not load the employee department.");
+  }
+
+  let reportCount = 0;
+  try {
+    const { count } = await client
+      .from("employee")
+      .select("id", { count: "exact", head: true })
+      .eq("manager_id", employeeId);
+    reportCount = count ?? 0;
+  } catch {
+    // Profile rendering should remain useful even if the optional count fails.
+  }
+
+  return {
+    employee: {
+      id: employee.id,
+      name: employee.name,
+      hireDate: employee.hire_date,
+      managerId: employee.manager_id,
+    },
+    department: {
+      id: department.id,
+      name: department.name,
+      location: department.location,
+    },
+    manager: manager ? { id: manager.id, name: manager.name } : null,
+    address: address
+      ? { city: address.city, state: address.state, pinCode: address.pin_code }
+      : null,
+    salary: salary
+      ? { amount: salary.amount, currency: salary.currency, effectiveFrom: salary.effective_from }
+      : null,
+    directReports: reportCount,
+  };
+}
+
 /**
  * Lightweight server-side connection test used by /api/health.
  * It verifies that the configured credentials can call the DataMind RPC.
