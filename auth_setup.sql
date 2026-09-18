@@ -257,12 +257,14 @@ begin
     end if;
     
     -- Sensitive admin reads must be scoped to the authenticated hierarchy.
-    if (v_has_salary or v_has_address or v_has_job_history or v_has_employee)
-       and not v_is_aggregate then
+    if v_has_salary or v_has_address or v_has_job_history then
       if not (
         v_sql_lower ~ ('get_hierarchy\\s*\\(\\s*' || p_employee_id || '\\s*\\)')
         or v_sql_lower ~ ('employee\\.id\\s*=\\s*' || p_employee_id || '\\y')
         or v_sql_lower ~ ('employee\\.id\\s+in\\s*\\(.*get_hierarchy')
+        or v_sql_lower ~ ('salary\\.employee_id\\s*=\\s*' || p_employee_id || '\\y')
+        or v_sql_lower ~ ('address\\.employee_id\\s*=\\s*' || p_employee_id || '\\y')
+        or v_sql_lower ~ ('job_history\\.employee_id\\s*=\\s*' || p_employee_id || '\\y')
       ) then
         return jsonb_build_object(
           'authorized', false,
