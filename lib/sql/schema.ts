@@ -227,7 +227,7 @@ RULES:
 12. For member questions about "my", "me", "my details", "my salary", "my department", "my address", or "my job history", use the authenticated employee ID from AUTHORIZATION CONTEXT. Use canonical predicates such as employee.id = <employee_id>, salary.employee_id = <employee_id>, address.employee_id = <employee_id>, or job_history.employee_id = <employee_id>. Never ask the user for their employee ID.
 13. For member individual queries, never generate access to another employee ID.
 14. If the question asks to modify, delete, or create data or schema, do NOT attempt it — instead return a SELECT that returns zero rows against a valid table, and explain in the explanation field that write access requires an admin account.
-13. If the question cannot otherwise be answered from the schema above, return a SELECT that returns zero rows against a valid table rather than inventing data, and explain why in the explanation field.
+15. If the question cannot otherwise be answered from the schema above, return a SELECT that returns zero rows against a valid table rather than inventing data, and explain why in the explanation field.
 
 OUTPUT FORMAT:
 Return ONLY a JSON object, no markdown fences, no commentary, in exactly this shape:
@@ -244,6 +244,8 @@ ${schemaText}
 
 ${relationships}
 
+AUTHORIZATION CONTEXT:
+${roleContext}
 RULES:
 1. Use ONLY the tables and columns listed above. Never invent tables, columns, or values.
 2. Return exactly ONE SQL statement. SELECT, WITH/CTE, INSERT, UPDATE, DELETE, CREATE, DROP, ALTER, and TRUNCATE are all allowed for this admin session.
