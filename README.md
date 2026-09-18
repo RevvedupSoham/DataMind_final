@@ -174,6 +174,14 @@ Run `setup.sql`, then `auth_setup.sql`, then `auth_authorization_patch.sql`.
 The final patch is intentionally applied after the base auth setup so fresh
 and existing installations use the same multi-account authorization behavior.
 
+## Member workspace
+
+Members have a dedicated read-only experience as well as a separate login panel.
+The member workspace exposes personal-data queries (details, department, address,
+current salary, and permitted job history) plus approved general aggregates.
+The UI does not expose admin controls or CSV export to members, and the backend
+still enforces the same scope independently of the interface.
+
 ## Architecture
 
 ```
