@@ -107,6 +107,12 @@ begin
 
   own_hierarchy := s ~ ('\mget_hierarchy\M\s*\(\s*' || p_employee_id || '\s*\)');
   any_hierarchy := s ~ '\mget_hierarchy\M\s*\(\s*[0-9]+\s*\)';
+  foreign_hierarchy := regexp_replace(
+    s,
+    ('\mget_hierarchy\M\s*\(\s*' || p_employee_id || '\s*\)'),
+    '',
+    'g'
+  ) ~ '\mget_hierarchy\M\s*\(\s*[0-9]+\s*\)';
 
   if p_role = 'member' then
     if has_employee or has_salary or has_address or has_history or has_assignment then
@@ -270,6 +276,8 @@ declare
   has_where boolean;
   has_or boolean;
   own_hierarchy boolean;
+  read_auth jsonb;
+  read_sql text;
 begin
   if p_role <> 'admin' then raise exception 'Write operations require admin access'; end if;
 
