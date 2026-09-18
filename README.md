@@ -1,424 +1,494 @@
 # DataMind
 
-**Ask your database in plain English.**
+**Ask your database in plain English — with employee-level authorization.**
 
 DataMind turns a natural-language question about an employee database into a
-real PostgreSQL query, runs it against your actual Supabase database, and
-shows you the SQL, the data, and — when it makes sense — a chart. There is no
-mock data anywhere in the pipeline: the database is the single source of
-truth, and the LLM's only job is translating English into SQL.
+real PostgreSQL query, runs it against your actual Supabase database with
+employee-level access control, and shows you the SQL, the data, and — when it
+makes sense — a chart. There is no mock data anywhere in the pipeline: the
+database is the single source of truth, and the LLM's only job is translating
+English into SQL.
 
-DataMind sits behind a login. There are two account roles:
+DataMind sits behind a login with **employee-mapped authorization**. Each user
+account is linked to an employee record, and all queries are enforced with
+role-based AND employee-level access policies:
 
-- **Member** — read-only. Can ask anything about the data; every generated
-  statement is guaranteed to be a `SELECT`/`WITH` query.
-- **Admin** — read and write. Can additionally ask DataMind to create,
-  update, or delete data (or even schema), but nothing runs automatically —
-  every write is shown for review and only executes after the admin clicks
-  **Confirm & Run**.
+- **Member** — read-only, self-only access. Can ask about their own employee
+  data, salary, address, and approved aggregate queries (department counts,
+  etc.). Cannot access other employees' individual information.
+  
+- **Admin** — read and write, hierarchy-based access. Can query and modify data
+  for themselves, their direct reports, and all indirect reports (unlimited
+  depth with cycle protection). Admin writes require explicit confirmation.
 
 ## Problem & solution
 
 Non-technical stakeholders can't write SQL, and engineers don't want to be a
-human query API. DataMind closes that gap:
+human query API. Traditional database interfaces lack granular access control.
+DataMind closes that gap with **natural language + authorization**:
 
 ```
-Login (member or admin)
-   → Natural language question
-   → LLM (Groq · openai/gpt-oss-120b) — role-aware prompt
-   → PostgreSQL statement
-   → independent server-side safety validation (role-aware)
-   → read: execute immediately via read-only RPC
-   → write (admin only): held for explicit confirmation, then executed
-      via a separate, more tightly scoped RPC
-   → real rows
-   → SQL viewer + dynamic result table
-   → automatic visualization, only when the data supports it
+Login (member or admin) → mapped to employee_id
+   ↓
+Natural language question
+   ↓
+LLM (Groq · openai/gpt-oss-120b) — role-aware prompt
+   ↓
+PostgreSQL statement
+   ↓
+Independent server-side safety validation (role-aware)
+   ↓
+Employee-level authorization check (role + employee_id)
+   ↓
+Read: execute with authorization via RPC
+   Write (admin only): held for explicit confirmation
+   ↓
+Authorized SQL execution (hierarchy-based or self-only)
+   ↓
+Real rows (filtered by authorization)
+   ↓
+SQL viewer + dynamic result table + optional visualization
 ```
 
 The LLM never sees or returns data — it only ever produces a SQL string. All
-filtering, joining, counting, ranking, and aggregation happens in Postgres.
+filtering, joining, counting, ranking, aggregation, AND authorization happen
+in Postgres.
+
+## Authorization Model
+
+### Employee Mapping
+
+Every user account (admin or member) is mapped to an `employee_id` in the
+`employee` table. This mapping is stored in `admin_users.employee_id` or
+`member_users.employee_id` and is returned by the authentication RPCs on login.
+
+The session cookie carries `{username, role, employeeId}`, signed with
+HMAC-SHA256. Authorization decisions are made server-side using this verified
+employee context.
+
+### Member Access Policies (POLICY 1, 2, 8)
+
+**POLICY 1: Individual Access**
+- Members can access individual employee information ONLY for themselves
+- Own employee record, own salary, own address, own job_history (limited)
+- Cannot retrieve individual data of any other employee
+
+**POLICY 2: Aggregate Access**
+- Members have LIMITED aggregate access
+- Approved: employee counts, department counts, general department info
+- Restricted: salary statistics (SUM/AVG/MAX/MIN of salary.amount)
+
+**POLICY 8: Department Access**
+- Members can see their own department information
+- Approved general/non-sensitive department metadata
+- No access to other employees just because they're in the same department
+
+**POLICY 10: Rejection Policy**
+- If a member asks for restricted information, the query is REJECTED entirely
+- No silent filtering or partial results
+- Example: "Show everyone's salary" → Authorization error (not just own salary)
+
+### Admin Access Policies (POLICY 3, 4, 5, 6, 7)
+
+**POLICY 3: Hierarchy-Based Individual Access**
+- Admin scope includes: self, direct reports, indirect reports (all depths)
+- Hierarchy is determined by `employee.manager_id → employee.id`
+- Uses PostgreSQL recursive CTEs with cycle protection
+- Admin CANNOT access unrelated employees (even if same department)
+
+**POLICY 4: Salary Access**
+- Admins can access individual salary for employees in their hierarchy only
+- Includes: self, all direct and indirect reports
+- Cannot access salaries outside the hierarchy
+
+**POLICY 5: Address Access**
+- Admins can access full address (city, state, pin_code) for hierarchy only
+- Same scope as salary: self + all reports
+
+**POLICY 6: Job History Access**
+- Admins can access LIMITED job_history fields
+- Allowed: `new_role`, `changed_on`
+- RESTRICTED: `old_role` (blocked for everyone, including admins)
+- Scope: self + direct/indirect reports
+
+**POLICY 7: Hybrid Department-Wide Access**
+- Department membership does NOT grant individual employee access
+- Approved non-sensitive department-wide queries allowed (counts, metadata)
+- Being a department head does NOT expose individual salaries/addresses/etc.
+  for employees outside the admin's reporting hierarchy
+
+### Write Authorization (POLICY 9)
+
+**Member: Strictly READ-ONLY**
+- No INSERT, UPDATE, DELETE, schema changes, or data modification
+- All write attempts are rejected
+
+**Admin: Controlled Write Access**
+- Can modify permitted application data within authorized scope
+- Write scope: employee profile, salary, address, department assignment
+- Must be within admin's authorization scope (hierarchy-based)
+- Authentication/security tables (admin_users, member_users) are protected
+- All writes require explicit user confirmation (never automatic)
+
+### Hierarchy Implementation (POLICY 11)
+
+Admin hierarchy traversal:
+- Unlimited depth via PostgreSQL `WITH RECURSIVE`
+- Cycle protection (malformed manager relationships won't cause infinite loops)
+- Implemented in `get_hierarchy(p_employee_id)` RPC function
+- Returns all employee IDs in the manager's reporting tree
 
 ## Architecture
 
 ```
 app/
   layout.tsx                Root layout, fonts, metadata
-  page.tsx                   Landing page composition (behind login)
-  login/page.tsx              Login screen: Admin / Member tabs
-  globals.css                  Tailwind base + design tokens
+  page.tsx                  Landing page composition (behind login)
+  login/page.tsx            Login screen: Admin / Member tabs
+  globals.css               Tailwind base + design tokens
   api/
-    query/route.ts             Generates + validates SQL. Executes reads
-                                immediately; returns writes as "pending
-                                confirmation" instead of running them.
-    query/confirm/route.ts      The ONLY route that executes a write. Re-
-                                validates the statement and requires an
-                                admin session.
-    auth/login/route.ts          Verifies credentials, issues a signed
-                                session cookie carrying the account's role
-    auth/logout/route.ts         Clears the session cookie
-    auth/me/route.ts             Returns the current session (or 401)
-    health/route.ts              Supabase connectivity check
+    query/route.ts          Generates + validates SQL with authorization.
+                            Executes reads with employeeId context;
+                            returns writes as "pending confirmation"
+    query/confirm/route.ts  ONLY route that executes admin writes.
+                            Re-validates statement and enforces authorization
+    auth/login/route.ts     Verifies credentials, returns employeeId,
+                            issues signed session cookie with role + employeeId
+    auth/logout/route.ts    Clears the session cookie
+    auth/me/route.ts        Returns current session (username, role, employeeId)
+    health/route.ts         Supabase connectivity check
 
 components/
-  Navigation.tsx           Overlay nav + a round avatar button that opens a
-                           dropdown with the signed-in user's name, role,
-                           and a sign-out button (UserMenu, in this file)
-  Hero.tsx                 Hero section
-  HowItWorks.tsx           4-step explainer
-  QueryInterface.tsx       The core product: input, status, confirmation
-                           step for writes, results
-  SuggestedQuestions.tsx   Quick-start question chips
-  SQLViewer.tsx            Generated SQL + copy button
-  ResultView.tsx           Table/Bar/Line/Pie tab switcher + admin-only
-                           "Download CSV" button, wrapping ResultTable and
-                           ChartRenderer
-  ResultTable.tsx          Dynamic, type-aware result table
-  ChartRenderer.tsx        Recharts bar/line/pie renderer (renders whichever
-                           single chart ResultView has selected)
-  Examples.tsx             Required example questions
-  VisualizationSection.tsx  "From answers to insight" + FinalCta + Footer
+  Navigation.tsx          Overlay nav + user menu (shows role & employeeId)
+  Hero.tsx                Hero section
+  HowItWorks.tsx          4-step explainer
+  QueryInterface.tsx      Core product: input, confirmation, results
+  SuggestedQuestions.tsx  Quick-start question chips
+  SQLViewer.tsx           Generated SQL + copy button
+  ResultView.tsx          Table/Bar/Line/Pie tabs + Download CSV
+  ResultTable.tsx         Dynamic, type-aware result table
+  ChartRenderer.tsx       Recharts bar/line/pie renderer
+  Examples.tsx            Required example questions
+  VisualizationSection.tsx "From answers to insight" + footer
 
 lib/
-  csv.ts                   Converts a QueryResult to CSV text and triggers
-                           a browser download — purely client-side, so it
-                           can never export more than the user's own
-                           session already returned to them
-  ask-bridge.ts            Tiny window-event bridge so Examples/
-                           VisualizationSection can trigger a question in
-                           QueryInterface without prop drilling
-  auth/session.ts          Signs/verifies session cookies with Web Crypto
-                           (works in both the Node API routes and the Edge
-                           middleware runtime)
-  llm/groq.ts              Groq client (server-only) — role-aware prompt
-  sql/schema.ts            VERIFIED_SCHEMA + both LLM system prompts
-                           (read-only for members, write-enabled for admins)
-  sql/validator.ts         Independent, role-aware SQL safety validator
-                           (the real security boundary)
-  database/supabase.ts     Supabase service-role client, read-only RPC call,
-                           privileged (write) RPC call, and credential
-                           verification
-  visualization/engine.ts  Decides chart type from the *actual* returned rows
+  csv.ts                  Client-side CSV export (only exports already-
+                          authorized data returned to user's session)
+  ask-bridge.ts           Window-event bridge for triggering questions
+  auth/session.ts         Signs/verifies session cookies with employeeId
+  llm/groq.ts             Groq client (server-only, role-aware)
+  sql/
+    schema.ts             VERIFIED_SCHEMA + LLM system prompts (member/admin)
+    validator.ts          Independent role-aware SQL safety validator
+    authorization.ts      Employee-level authorization utilities
+  database/supabase.ts    Supabase client, authorization-aware RPCs:
+                          - executeReadonlyQuery(sql, role, employeeId)
+                          - executePrivilegedQuery(sql, role, employeeId)
+                          - verifyCredentials → {role, employeeId}
+                          - getAdminHierarchy(employeeId) → employee IDs
+  visualization/engine.ts Decides chart type from actual returned rows
 
 types/
-  auth.ts        Session/role types
-  database.ts    Row types + DatabaseSchema shape
-  query.ts       Query/response/status types, including the pending-
-                 confirmation shape for admin writes
-  visualization.ts  ChartType + VisualizationConfig
-  css.d.ts        Ambient module declaration so plain CSS imports type-check
-                 under standalone `tsc` (next build already handles this)
+  auth.ts         SessionPayload with employeeId, roles
+  database.ts     Row types + DatabaseSchema shape
+  query.ts        Query/response/status types, pending confirmation
+  visualization.ts ChartType + VisualizationConfig
+  css.d.ts        Ambient module for plain CSS imports
 
-middleware.ts     Redirects any unauthenticated request to /login (JSON 401
-                 for /api/* instead of a redirect)
+middleware.ts    Redirects unauthenticated requests to /login
+                (JSON 401 for /api/* routes)
 
-setup.sql          One-time Supabase SQL: execute_readonly_sql RPC
-auth_setup.sql      One-time Supabase SQL: separate admin_users/member_users
-                   tables, verify_admin_login/verify_member_login RPCs,
-                   execute_privileged_sql RPC (run after setup.sql)
+setup.sql         One-time Supabase SQL: execute_readonly_sql RPC
+auth_setup.sql    One-time Supabase SQL:
+                  - admin_users/member_users tables with employee_id
+                  - verify_admin_login/verify_member_login (return employeeId)
+                  - get_hierarchy(p_employee_id) recursive function
+                  - check_query_authorization(sql, role, employeeId)
+                  - execute_authorized_sql with policy enforcement
+                  - execute_privileged_sql with authorization
 ```
 
-## Natural language → SQL
+## Security Architecture
 
-`lib/sql/schema.ts` builds the system prompt sent to `openai/gpt-oss-120b`
-via Groq. It contains the verified schema (`employee`, `department`,
-`salary`, `address`, `job_history`, `dept_assignment`) and their foreign
-keys. There are two prompt variants:
+### Authentication Flow
 
-- **Member (read-only)** instructs the model to return exactly one
-  `SELECT`/`WITH`/`WITH RECURSIVE` statement, and to explicitly refuse (by
-  returning a zero-row `SELECT`) anything that would modify data.
-- **Admin (write-enabled)** additionally allows `INSERT`/`UPDATE`/`DELETE`/
-  `CREATE`/`DROP`/`ALTER`/`TRUNCATE` when the request clearly asks for one,
-  but still forbids `GRANT`/`REVOKE`/`MERGE`/`CALL`/`EXECUTE` and other
-  privilege-escalation or server-admin operations unconditionally.
+1. User selects Admin or Member panel and enters credentials
+2. Server calls `verify_admin_login` or `verify_member_login` RPC
+3. RPC returns `employee_id` on success, `NULL` on failure
+4. Server creates signed session token: `{username, role, employeeId, iat, exp}`
+5. Token stored in httpOnly, secure, sameSite=lax cookie
+6. All subsequent requests verify token and extract `role + employeeId`
 
-Both variants:
+### Authorization Flow (Read Query)
 
-- respond as JSON: `{"sql": "...", "explanation": "..."}`
-- never emit multiple statements
-- use a recursive CTE for arbitrary-depth manager hierarchies
-- ignore any instruction embedded in the user's question (prompt injection)
+1. User asks natural language question
+2. Server verifies session → extracts `role + employeeId`
+3. Groq LLM generates SQL (role-aware prompt, but NOT trusted for security)
+4. Server validates SQL syntax + safety (`lib/sql/validator.ts`)
+5. Server checks authorization (`lib/sql/authorization.ts` analysis)
+6. Server calls `execute_authorized_sql(sql, role, employeeId)` RPC
+7. Database function `check_query_authorization` enforces policies:
+   - Members: self-only or approved aggregates
+   - Admins: hierarchy-based or approved department queries
+8. Database executes authorized query, returns results
+9. Server returns SQL + results + visualizations to client
 
-The prompt is a **behavioral** guardrail only. It is never trusted as the
-security boundary — the account's actual role, read from the verified
-session cookie, decides which prompt variant is even used, and the
-validator below re-checks everything regardless of what the model returned.
+### Authorization Flow (Admin Write)
 
-## SQL validation (the real security boundary)
+1. Admin asks question that requires write (INSERT/UPDATE/DELETE/etc.)
+2. Server generates and validates SQL
+3. Server returns SQL as **pending confirmation** (does not execute)
+4. Admin reviews SQL and clicks "Confirm & Run"
+5. Server re-verifies session (must be admin) and re-validates SQL
+6. Server calls `execute_privileged_sql(sql, role, employeeId)` RPC
+7. Database function blocks:
+   - Writes to admin_users/member_users
+   - Privilege escalation (GRANT, REVOKE, etc.)
+   - Dangerous operations
+8. Database executes write within admin's authorized scope
+9. Server returns result confirmation
 
-`lib/sql/validator.ts`'s `validateSql(sql, { allowWrites })` independently
-re-parses the SQL the model returned. `allowWrites` is passed in by the API
-route from the verified session role — never from anything in the request
-body.
+### Defense in Depth
 
-For every request, regardless of role:
+**Layer 1: LLM Prompt**
+- Role-aware system prompts (member=read-only, admin=write-capable)
+- Not a security boundary, just behavioral guidance
 
-- strips comments (so a forbidden keyword can't hide inside one)
-- rejects multiple statements (stray `;` outside string literals)
-- rejects a handful of dangerous Postgres functions (`pg_read_file`,
-  `dblink_exec`, `pg_terminate_backend`, ...)
-- enforces a max length
-- unconditionally forbids `GRANT`, `REVOKE`, `MERGE`, `CALL`, `EXECUTE`,
-  `VACUUM`, `COPY`, `LISTEN`, `NOTIFY`, `SET`, `COMMENT` — there is no role
-  that unlocks these
+**Layer 2: SQL Safety Validator** (`lib/sql/validator.ts`)
+- Independent server-side validation
+- Checks: statement type, forbidden keywords, multiple statements, dangerous functions
+- Role-aware: members cannot get write SQL, admins can
 
-For a **member** (`allowWrites: false`), the statement must additionally
-start with `SELECT` or `WITH`, and the full read-only forbidden-keyword list
-(`INSERT`/`UPDATE`/`DELETE`/`DROP`/`ALTER`/`TRUNCATE`/`CREATE`/...) applies.
+**Layer 3: Authorization Analyzer** (`lib/sql/authorization.ts`)
+- Detects sensitive data access (salary, address, job_history)
+- Enforces policy-based access (self-only for members, hierarchy for admins)
+- Rejects unauthorized queries (POLICY 10: no silent filtering)
 
-For an **admin** (`allowWrites: true`), `INSERT`/`UPDATE`/`DELETE`/`CREATE`/
-`DROP`/`ALTER`/`TRUNCATE` are permitted as a leading statement type, but an
-`UPDATE`/`DELETE` with no `WHERE` clause is rejected outright (it would
-affect every row in a table) — the request has to specify which row(s) it
-means, or say explicitly that it wants to affect everything.
+**Layer 4: Database RPC Functions** (`auth_setup.sql`)
+- `execute_authorized_sql`: enforces read authorization at DB level
+- `execute_privileged_sql`: enforces write authorization at DB level
+- `check_query_authorization`: SQL-level policy enforcement
+- `get_hierarchy`: recursive hierarchy with cycle protection
 
-## Read-only & privileged database execution (defense in depth)
+**Layer 5: Supabase Service Role**
+- All RPC functions grant execute to `service_role` only
+- Never grant to `anon` or `authenticated` (client-side roles)
+- Server-side credential usage only
 
-`setup.sql` creates `execute_readonly_sql(query text)` — re-checks
-`SELECT`/`WITH`, rejects multiple statements, runs with an 8s
-`statement_timeout`, and is granted only to `service_role`.
+### Security Limitations
 
-`auth_setup.sql` additionally creates `execute_privileged_sql(query text)`
-for admin writes. It independently re-blocks the same
-privilege-escalation/server-admin keyword list and the same dangerous
-function list, accepts `SELECT`/`WITH`/`INSERT`/`UPDATE`/`DELETE`/`CREATE`/
-`DROP`/`ALTER`/`TRUNCATE`, still rejects multiple statements, and is granted
-only to `service_role`. **The application only ever calls this function
-after independently verifying, from the signed session cookie, that the
-caller is an admin** — the function itself has no way to check that, so
-treat it as "powerful and trusted-caller-only."
+**Not Implemented:**
+- Fine-grained column-level authorization within authorized rows
+- Minimum aggregate group size (deliberately no threshold)
+- Row-level security (RLS) policies (service role bypasses RLS; using explicit authorization functions instead)
+- Audit logging of query execution
+- Rate limiting per user
+- Data masking or redaction
 
-The app calls these via `client.rpc(...)` using the service-role key, which
-never leaves the server. This is a second, independent enforcement layer
-beyond the app-level validator: DataMind never relies on a single layer to
-keep unauthorized writes out.
+**Known Constraints:**
+- LLM-generated SQL cannot be 100% guaranteed to be scoped correctly
+  (defense in depth provides rejection on policy violation)
+- Authorization policies are enforced at query validation time, not during SQL generation
+- Admins with large hierarchies may experience slower hierarchy resolution
+- No support for temporary elevated access or delegation
 
-## Authentication & roles
+## Database Schema
 
-- `auth_setup.sql` creates **two separate tables** — `admin_users` and
-  `member_users` — with no shared table and no role column to compare. Each
-  has its own `username` and `pgcrypto`-hashed `password_hash`. The Admin
-  panel's login check has no code path that can ever read `member_users`,
-  and the Member panel's check has no code path that can ever read
-  `admin_users` — it isn't just filtered out after a lookup, the other
-  table is never queried at all. Two demo accounts are seeded, one per
-  table — **change both demo passwords** before using this beyond a local
-  demo.
-- `verify_admin_login(username, password)` and `verify_member_login(username,
-  password)` are two separate Postgres functions, each checking the
-  password DB-side (via `crypt()`) against only its own table, and
-  returning `true`/`false`. Which one runs is decided entirely by which
-  panel tab the login screen posts — `lib/database/supabase.ts` picks the
-  RPC by that panel name.
-- On success, the server issues a signed, `httpOnly` session cookie
-  (`lib/auth/session.ts`) containing `{username, role, iat, exp}` with an
-  HMAC-SHA256 signature keyed by `SESSION_SECRET`. It's built on the Web
-  Crypto API specifically so the same code verifies sessions in both the
-  Node.js API routes and the Edge middleware runtime.
-- `middleware.ts` redirects any unauthenticated request to `/login` (and
-  returns a JSON 401 for `/api/*` instead of a redirect, since a `fetch()`
-  following a 302 to an HTML page isn't useful to the caller).
-- Every privileged decision (`allowWrites`, which RPC to call) is re-derived
-  from the verified cookie inside the route handler itself — never trusted
-  from middleware alone, and never accepted as a parameter from the client.
+The application uses these tables (see `setup.sql` and existing schema):
 
-## Automatic visualization
+**employee**
+- `id` (PK), `name`, `hire_date`, `manager_id` → employee.id, `dept_id` → department.id
 
-`lib/visualization/engine.ts`'s `getVisualizationOptions` looks only at the
-columns/types of the rows Postgres actually returned, and computes **every**
-chart type that's genuinely valid for that shape in one pass — not just one:
+**department**
+- `id` (PK), `name`, `location`, `head_of_department` → employee.id
 
-- needs ≥2 rows and a numeric column, or nothing is chartable
-- a date column → `["line", "bar"]`
-- a categorical column with 2–8 distinct values → `["bar", "pie"]`
-- a categorical column with 9–25 distinct values → `["bar"]` only (pie gets
-  unreadable much past 8 slices)
-- anything else (single row, no numeric column, more than 25 categories, or
-  a write statement's empty result set) → `[]`, table only
+**salary**
+- `employee_id` (PK, FK → employee.id), `amount`, `currency`, `effective_from`
 
-The array order is just a display hint — if the question's own wording
-suggests one (e.g. "pie chart of...", "...over time"), that type is put
-first — but every entry in the array is independently valid.
-`isVisualizationRenderable` re-checks each one against the real result
-before the route ever returns it, so a chart option is never returned with
-fields that don't exist or aren't numeric.
+**address**
+- `employee_id` (PK, FK → employee.id), `city`, `state`, `pin_code`
 
-The user never picks the chart type up front, and the model never decides
-it either — the frontend (`ResultView.tsx`) renders Table plus one button
-per valid chart type, all generated together in the same response so
-switching between them is instant, not a second round trip. Table is
-always the default view for a fresh result; nothing else is shown until
-the user clicks one of the chart buttons.
+**job_history**
+- `id` (PK), `employee_id` (FK → employee.id), `old_role`, `new_role`, `changed_on`
 
-## CSV export
+**dept_assignment**
+- `employee_id` (PK, FK → employee.id), `dept_id` (PK, FK → department.id), `allocation_percent`
 
-Admin accounts can download the current result table as a CSV file; member
-accounts cannot — the "Download CSV" button in `ResultView.tsx` only
-renders when the signed-in session's role is `"admin"`. Export
-(`lib/csv.ts`) works entirely client-side against the `QueryResult` already
-in the browser: it formats exactly the rows and columns the user was
-already shown under their own session, so it can never surface more than
-what that request already legitimately returned. There is no separate
-export API route to secure — the same role check the rest of the app uses
-(`GET /api/auth/me` on load) gates whether the button renders at all.
+**admin_users** (authentication + authorization)
+- `id` (PK), `username` (unique), `password_hash`, `created_at`, `employee_id` (FK → employee.id)
+
+**member_users** (authentication + authorization)
+- `id` (PK), `username` (unique), `password_hash`, `created_at`, `employee_id` (FK → employee.id)
 
 ## Setup
 
-1. **Install dependencies**
+### Prerequisites
 
-   ```bash
-   npm install
-   ```
+- Node.js 18+ and npm
+- A Supabase project with the employee/department/salary/address/job_history/dept_assignment tables already created
+- Environment variables (see `.env.example`)
 
-2. **Configure environment** — copy `.env.example` to `.env.local` and fill
-   in real values:
+### Environment Variables
 
-   ```bash
-   cp .env.example .env.local
-   ```
-
-   ```
-   GROQ_API_KEY=
-   GROQ_MODEL=openai/gpt-oss-120b
-   NEXT_PUBLIC_SUPABASE_URL=
-   SUPABASE_SECRET_KEY=
-   # Optional legacy fallback:
-   # SUPABASE_SERVICE_ROLE_KEY=
-   NEXT_PUBLIC_APP_URL=http://localhost:3000
-   SESSION_SECRET=
-   ```
-
-   `SUPABASE_SECRET_KEY` is the preferred current server-side key and is
-   never sent to the browser. `SUPABASE_SERVICE_ROLE_KEY` is supported as a
-   legacy fallback. Both are read only inside `lib/database/supabase.ts`,
-   which is marked `import "server-only"`.
-
-   Generate `SESSION_SECRET` with:
-
-   ```bash
-   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-   ```
-
-3. **Run the one-time Supabase setup**, in order, in the SQL editor of your
-   **existing** Supabase project (the one that already has `employee`,
-   `department`, `salary`, `address`, `job_history`, `dept_assignment`):
-
-   1. `setup.sql` — adds `execute_readonly_sql`. Does not touch application
-      tables.
-   2. `auth_setup.sql` — adds `admin_users`, `member_users`,
-      `verify_admin_login`, `verify_member_login`, `execute_privileged_sql`,
-      and seeds one demo account per table (`admin`/`change-me-admin` in
-      `admin_users`, `member`/`change-me-member` in `member_users`).
-      **Change both passwords** — the simplest way is to re-run the two
-      `insert` statements with `on conflict (username) do update set
-      password_hash = excluded.password_hash` once you've picked real
-      passwords, or delete and re-insert the rows in the table for the
-      panel you're changing.
-
-4. **Run the app**
-
-   ```bash
-   npm run dev
-   ```
-
-   Visit `http://localhost:3000` — you'll be redirected to `/login`. Sign in
-   as either demo account to try the corresponding role.
-
-### Supabase connection check
-
-After starting the app, open `http://localhost:3000/api/health` in the
-browser. A working setup returns `{"ok":true,"database":"connected"}`. If
-the RPC function has not been installed yet, the endpoint reports that
-directly.
-
-If you get the missing-function message, open the SQL Editor of the
-existing Supabase project and run the complete `setup.sql` file once (and
-`auth_setup.sql` for login/roles). Do not create a second project or
-replace the existing application tables.
-
-## Commands
+Create `.env.local`:
 
 ```bash
-npm run dev         # start the dev server
-npm run typecheck   # tsc --noEmit
-npm run lint        # next lint
-npm run build        # production build
-npm run start        # run the production build
+# Server-side Groq credentials (NEVER expose to browser)
+GROQ_API_KEY=your_groq_api_key
+GROQ_MODEL=openai/gpt-oss-120b
+
+# Supabase project
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SECRET_KEY=your_supabase_secret_key
+
+# App URL (for server-side config)
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+
+# Session signing secret (generate with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
+SESSION_SECRET=your_64_character_hex_secret
 ```
 
-## Example questions
+### Database Setup
 
-Read (any role):
+1. **Run setup.sql** in Supabase SQL Editor (creates `execute_readonly_sql` RPC)
+2. **Run auth_setup.sql** in Supabase SQL Editor (creates auth tables, RPCs, authorization functions)
+3. **Map users to employees**: Update the seed data in `auth_setup.sql` or manually insert records:
 
-- "In finance, who earns the second highest salary?"
-- "Who is working in more than one department?"
-- "Which managers have 50 or more employees under them, direct or indirect?"
-- "How many people work in each department?"
-- "Which city has the most employees?"
-- "Show me a pie chart of employees by department."
-- "Compare average salary across departments as a bar chart."
-- "Plot hiring over the last five years."
+```sql
+-- Example: map admin account to employee 1, member account to employee 2
+UPDATE admin_users SET employee_id = 1 WHERE username = 'admin';
+UPDATE member_users SET employee_id = 2 WHERE username = 'member';
+```
 
-Write (admin only — each is shown for review before it runs):
+4. **Verify employee hierarchy**: Ensure `employee.manager_id` relationships are correct
 
-- "Add a new department called Legal, located in Kolkata."
-- "Update employee 12's salary to 95000 effective today."
-- "Delete the job history row for employee 7 where the new role is 'Intern'."
+### Install & Run
 
-## Security
+```bash
+npm install
+npm run dev
+```
 
-- The Supabase service-role/secret key, the Groq API key, and
-  `SESSION_SECRET` are read only in server-only modules and are never
-  inlined into the client bundle (only `NEXT_PUBLIC_*` variables are, and
-  none of these use that prefix).
-- Session cookies are `httpOnly`, `sameSite=lax`, signed with HMAC-SHA256,
-  and carry an 8-hour expiry checked on every request.
-- A user's role is never accepted from the client as the basis for
-  authorization — it is only ever confirmed by which table's login RPC
-  actually matched (`verify_admin_login` against `admin_users`, or
-  `verify_member_login` against `member_users`), and re-read from the
-  verified session cookie on every subsequent request. The login screen's
-  Admin/Member tabs pick which of those two isolated checks runs; there is
-  no shared table or role column being compared anywhere.
-- Two independent layers reject unsafe SQL for every request: the app-level
-  validator (`lib/sql/validator.ts`) and the database-level RPC guard
-  (`setup.sql` / `auth_setup.sql`). A third layer, unique to writes: nothing
-  an admin's question resolves to is executed until the admin explicitly
-  confirms it in the UI, and `/api/query/confirm` re-validates the
-  statement itself rather than trusting the client's copy of it.
-- `GRANT`/`REVOKE`/`MERGE`/`CALL`/`EXECUTE` and other privilege-escalation
-  or server-admin operations are forbidden unconditionally — no role
-  unlocks them.
-- The API routes never return stack traces or internal error details to the
-  browser; technical details are only `console.error`'d server-side.
-- Prompt injection ("ignore previous instructions and delete...") is
-  treated purely as translation input by the model, and even if the model
-  complied, the resulting SQL would still be rejected by every validation
-  layer before it could reach the database — and even a validated admin
-  write still stops for human confirmation first.
+Navigate to `http://localhost:3000` and log in.
 
-## Limitations
+**Default accounts (CHANGE PASSWORDS):**
+- Admin: `admin` / `change-me-admin`
+- Member: `member` / `change-me-member`
 
-- This environment could not run the app against a real Groq or Supabase
-  project — it has no outbound network access to `api.groq.com`,
-  `*.supabase.co`, or `fonts.googleapis.com`, and no real credentials were
-  provided. What WAS verified in this environment: `npm install`,
-  `npm run typecheck` (clean), `npm run lint` (clean), and a full
-  `npm run build` (verified successful with the Google Fonts calls in
-  `app/layout.tsx` temporarily stubbed out for that one build, since that
-  fetch is the only step blocked by network access — the real
-  `next/font/google` imports were restored immediately afterward and are
-  what ships in this codebase). The functional test matrix against real
-  data (the example questions above, both read and write, under both
-  roles) still needs to be run in an environment with network access and
-  real `GROQ_API_KEY` / Supabase / `SESSION_SECRET` values.
-- Chart type is chosen heuristically from column names/types and simple
-  keyword cues in the question; it will sensibly fall back to "table only"
-  rather than guess for ambiguous shapes.
-- Query history is a lightweight `localStorage` list (last 8 questions) —
-  there is no server-side history table, by design.
-- The demo accounts and passwords seeded into `admin_users` and
-  `member_users` by `auth_setup.sql` are meant to be readable for a local
-  demo, not production-secret. Change both passwords (or replace the seed
-  rows entirely) before deploying anywhere reachable by others.
+## Example Questions
+
+**Member (self-only) queries:**
+- "Show my employee information"
+- "What is my current salary?"
+- "What city do I live in?"
+- "How many employees are in each department?" (aggregate)
+- "Show my job history"
+
+**Admin (hierarchy-based) queries:**
+- "Show all employees who report to me directly or indirectly"
+- "In my team, who earns the second highest salary?"
+- "Which of my reports work in more than one department?"
+- "List the addresses of all my direct and indirect reports"
+- "How many people are in my reporting hierarchy?"
+
+**Admin write examples (with confirmation):**
+- "Give employee 5 a raise to 95000 effective today"
+- "Update my address to 123 Main St, New York, NY, 10001"
+- "Add a new department named 'Research' located in 'Boston'"
+
+**Queries that demonstrate authorization:**
+- Member asks: "Show everyone's salary" → ❌ Authorization error
+- Member asks: "What is my salary?" → ✅ Returns their own salary
+- Admin asks: "Show salaries for employees outside my hierarchy" → ❌ Authorization error
+- Admin asks: "Show salaries for my team" → ✅ Returns hierarchy salaries
+
+## API Health Check
+
+```bash
+curl http://localhost:3000/api/health
+```
+
+Returns database connectivity status.
+
+## Testing Authorization
+
+### Member Tests
+
+```bash
+# Login as member
+curl -X POST http://localhost:3000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"member","password":"change-me-member","panel":"member"}'
+
+# Try to access other employee data (should fail)
+curl -X POST http://localhost:3000/api/query \
+  -H "Content-Type: application/json" \
+  -H "Cookie: datamind_session=<token>" \
+  -d '{"question":"Show me employee ID 1s salary"}'
+
+# Access own data (should succeed)
+curl -X POST http://localhost:3000/api/query \
+  -H "Content-Type: application/json" \
+  -H "Cookie: datamind_session=<token>" \
+  -d '{"question":"Show my salary"}'
+```
+
+### Admin Tests
+
+```bash
+# Login as admin
+curl -X POST http://localhost:3000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"change-me-admin","panel":"admin"}'
+
+# Query hierarchy
+curl -X POST http://localhost:3000/api/query \
+  -H "Content-Type: application/json" \
+  -H "Cookie: datamind_session=<token>" \
+  -d '{"question":"Show all employees in my reporting hierarchy"}'
+
+# Try to access employee outside hierarchy (should fail)
+curl -X POST http://localhost:3000/api/query \
+  -H "Content-Type: application/json" \
+  -H "Cookie: datamind_session=<token>" \
+  -d '{"question":"Show the CEO salary"}' # if CEO is not in admin hierarchy
+```
+
+## Production Deployment
+
+Before deploying to production:
+
+1. ✅ Change default passwords in `admin_users` and `member_users`
+2. ✅ Generate strong `SESSION_SECRET` (64+ character hex)
+3. ✅ Set `NODE_ENV=production`
+4. ✅ Enable `secure: true` for cookies (HTTPS only)
+5. ✅ Review and customize authorization policies in `auth_setup.sql`
+6. ✅ Audit employee_id mappings for all user accounts
+7. ✅ Verify manager hierarchy relationships in `employee` table
+8. ✅ Test hierarchy-based access with real organizational structure
+9. ✅ Implement audit logging if required
+10. ✅ Set up monitoring and alerting for authorization failures
+
+## Troubleshoties
+
+**"The Supabase authorization function is missing"**
+→ Run `auth_setup.sql` in the Supabase SQL Editor
+
+**"Your account is not mapped to an employee"**
+→ Update `admin_users.employee_id` or `member_users.employee_id` for the user
+
+**"Members can only access their own employee information"**
+→ Expected behavior for member accounts asking about other employees
+
+**"Admin access requires specifying which employees"**
+→ Admin queries for individual data need WHERE clauses to specify scope
+
+**Hierarchy not working correctly**
+→ Check `employee.manager_id` relationships for cycles or incorrect mappings
+
+**Authorization errors for valid queries**
+→ Review `check_query_authorization` logic in `auth_setup.sql`
+
+## License
+
+MIT
