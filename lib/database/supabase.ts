@@ -10,6 +10,13 @@ export class DatabaseError extends Error {
   }
 }
 
+export class AuthorizationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AuthorizationError";
+  }
+}
+
 let cachedClient: SupabaseClient | null = null;
 let cachedConfig = "";
 
@@ -67,18 +74,25 @@ function inferColumnTypes(rows: QueryResultRow[], columns: string[]) {
 }
 
 /**
- * Executes a validated read-only SQL statement through the Supabase RPC
- * function created by setup.sql. The secret/service-role key is used only on
- * the server and this module is explicitly server-only.
+ * Executes a validated read-only SQL statement with authorization enforcement.
+ * Uses execute_authorized_sql RPC which enforces employee-level access policies.
  */
-export async function executeReadonlyQuery(sql: string): Promise<QueryResult> {
+export async function executeReadonlyQuery(
+  sql: string,
+  role: "admin" | "member",
+  employeeId: number
+): Promise<QueryResult> {
   const client = getServiceClient();
 
   let data: unknown;
   let error: { message?: string; code?: string; details?: string } | null = null;
 
   try {
-    const response = await client.rpc("execute_readonly_sql", { query: sql });
+    const response = await client.rpc("execute_authorized_sql", { 
+      p_sql: sql,
+      p_role: role,
+      p_employee_id: employeeId
+    });
     data = response.data;
     error = response.error;
   } catch (err) {
@@ -92,14 +106,23 @@ export async function executeReadonlyQuery(sql: string): Promise<QueryResult> {
     console.error("[DataMind] Supabase execution error:", error);
 
     const message = error.message ?? "unknown Supabase error";
-    if (/execute_readonly_sql|function .* does not exist|404/i.test(message)) {
+    
+    // Check for authorization errors
+    if (message.includes("cannot access") || 
+        message.includes("requires admin") || 
+        message.includes("restricted") ||
+        message.includes("authorization")) {
+      throw new AuthorizationError(message);
+    }
+    
+    if (/execute_authorized_sql|function .* does not exist|404/i.test(message)) {
       throw new DatabaseError(
-        "The Supabase read-only function is missing. Open Supabase SQL Editor and run setup.sql once."
+        "The Supabase authorization function is missing. Open Supabase SQL Editor and run auth_setup.sql once."
       );
     }
 
     throw new DatabaseError(
-      "Supabase rejected the database query. Check that setup.sql has been run and that the database schema matches DataMind."
+      "Supabase rejected the database query. Check that auth_setup.sql has been run and that the database schema matches DataMind."
     );
   }
 
@@ -116,24 +139,28 @@ export async function executeReadonlyQuery(sql: string): Promise<QueryResult> {
 
 /**
  * Executes an admin-authorized statement (including DDL/DML) through the
- * `execute_privileged_sql` RPC (see auth_setup.sql). This must ONLY ever be
- * called after the route handler has verified, from a signed session
- * cookie, that the request is from an authenticated admin — this function
- * itself does not and cannot re-check that.
- *
- * For a SELECT/WITH statement this behaves like executeReadonlyQuery. For a
- * write statement (INSERT/UPDATE/DELETE/CREATE/DROP/ALTER/TRUNCATE) it
- * returns an empty result set — there are no rows to show, only the fact
- * that the statement ran.
+ * `execute_privileged_sql` RPC with authorization enforcement.
  */
-export async function executePrivilegedQuery(sql: string): Promise<QueryResult> {
+export async function executePrivilegedQuery(
+  sql: string,
+  role: "admin" | "member",
+  employeeId: number
+): Promise<QueryResult> {
+  if (role !== "admin") {
+    throw new AuthorizationError("Write operations require admin access.");
+  }
+
   const client = getServiceClient();
 
   let data: unknown;
   let error: { message?: string; code?: string; details?: string } | null = null;
 
   try {
-    const response = await client.rpc("execute_privileged_sql", { query: sql });
+    const response = await client.rpc("execute_privileged_sql", { 
+      p_sql: sql,
+      p_role: role,
+      p_employee_id: employeeId
+    });
     data = response.data;
     error = response.error;
   } catch (err) {
@@ -147,6 +174,15 @@ export async function executePrivilegedQuery(sql: string): Promise<QueryResult> 
     console.error("[DataMind] Supabase privileged execution error:", error);
 
     const message = error.message ?? "unknown Supabase error";
+    
+    // Check for authorization errors
+    if (message.includes("cannot access") || 
+        message.includes("requires admin") || 
+        message.includes("restricted") ||
+        message.includes("authorization")) {
+      throw new AuthorizationError(message);
+    }
+    
     if (/execute_privileged_sql|function .* does not exist|404/i.test(message)) {
       throw new DatabaseError(
         "The Supabase admin execution function is missing. Open the SQL Editor and run auth_setup.sql once."
@@ -177,30 +213,28 @@ export async function executePrivilegedQuery(sql: string): Promise<QueryResult> 
  * It verifies that the configured credentials can call the DataMind RPC.
  */
 export async function checkDatabaseConnection(): Promise<void> {
-  await executeReadonlyQuery("SELECT 1 AS connected");
+  const client = getServiceClient();
+  // Use a simple query that doesn't require authorization
+  const { error } = await client.rpc("execute_readonly_sql", { 
+    query: "SELECT 1 AS connected" 
+  });
+  if (error) {
+    throw new DatabaseError("Database connection check failed");
+  }
 }
 
 /**
  * Verifies a username/password for ONE specific panel — "admin" or
- * "member" — against that panel's own table only.
+ * "member" — against that panel's own table only, and returns the
+ * employee_id if authentication succeeds.
  *
- * There is no shared users table and no role column being compared here.
- * An "admin" panel call runs verify_admin_login, which queries
- * admin_users only; a "member" panel call runs verify_member_login,
- * which queries member_users only (see auth_setup.sql). An admin's
- * credentials are structurally invisible to the member check and vice
- * versa — not just filtered out after a lookup, but never queried at all.
- *
- * Returns the granted role ("admin" | "member") on success — which is
- * simply the panel that was checked, since success is only possible
- * against that panel's own table — or null on any failure (unknown
- * user, wrong password, missing setup).
+ * Returns { role, employeeId } on success, or null on failure.
  */
 export async function verifyCredentials(
   username: string,
   password: string,
   panel: "admin" | "member"
-): Promise<"admin" | "member" | null> {
+): Promise<{ role: "admin" | "member"; employeeId: number } | null> {
   const client = getServiceClient();
 
   const rpcName = panel === "admin" ? "verify_admin_login" : "verify_member_login";
@@ -215,5 +249,33 @@ export async function verifyCredentials(
     return null;
   }
 
-  return data === true ? panel : null;
+  // The RPC now returns employee_id (int4) on success, NULL on failure
+  if (typeof data === "number" && data > 0) {
+    return { role: panel, employeeId: data };
+  }
+
+  return null;
+}
+
+/**
+ * Gets all employee IDs in an admin's reporting hierarchy
+ * (self + all direct and indirect reports, with cycle protection)
+ */
+export async function getAdminHierarchy(employeeId: number): Promise<number[]> {
+  const client = getServiceClient();
+  
+  const { data, error } = await client.rpc("get_hierarchy", {
+    p_employee_id: employeeId
+  });
+  
+  if (error) {
+    console.error("[DataMind] get_hierarchy RPC error:", error.message);
+    throw new DatabaseError("Failed to retrieve employee hierarchy");
+  }
+  
+  if (!Array.isArray(data)) {
+    return [];
+  }
+  
+  return data.map((row: { employee_id: number }) => row.employee_id);
 }
