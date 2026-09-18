@@ -17,6 +17,15 @@ const STATUS_LABELS: Record<Extract<QueryStatus, "generating_sql" | "running_que
 const HISTORY_KEY = "datamind:history";
 const MAX_HISTORY = 8;
 
+type EmployeeProfile = {
+  employee: { id: number; name: string; hireDate: string; managerId: number | null };
+  department: { id: number; name: string; location: string };
+  manager: { id: number; name: string } | null;
+  address: { city: string; state: string; pinCode: string | number } | null;
+  salary: { amount: number | string; currency: string; effectiveFrom: string } | null;
+  directReports: number;
+};
+
 function loadHistory(): string[] {
   if (typeof window === "undefined") return [];
   try {
@@ -46,6 +55,10 @@ export function QueryInterface() {
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<string[]>([]);
   const [role, setRole] = useState<UserRole | null>(null);
+  const [username, setUsername] = useState<string | null>(null);
+  const [profile, setProfile] = useState<EmployeeProfile | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [profileError, setProfileError] = useState<string | null>(null);
   const cycleRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const resultRef = useRef<HTMLDivElement | null>(null);
 
@@ -53,12 +66,23 @@ export function QueryInterface() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/auth/me")
+
+    fetch("/api/auth/profile")
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (!cancelled && data?.role) setRole(data.role as UserRole);
+        if (cancelled) return;
+        if (data?.role) setRole(data.role as UserRole);
+        if (data?.username) setUsername(data.username);
+        if (data?.profile) setProfile(data.profile as EmployeeProfile);
+        else setProfileError("Your profile could not be loaded.");
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (!cancelled) setProfileError("Your profile could not be loaded.");
+      })
+      .finally(() => {
+        if (!cancelled) setProfileLoading(false);
+      });
+
     return () => { cancelled = true; };
   }, []);
 
@@ -196,6 +220,78 @@ export function QueryInterface() {
             </div>
           )}
         </div>
+
+        {profileLoading && (
+          <div className="mt-8 border border-ink-800 bg-ink-900/50 px-5 py-4">
+            <div className="flex items-center gap-3">
+              <div className="h-4 w-4 animate-spin rounded-full border border-ink-700 border-t-accent-400" />
+              <span className="text-[10px] uppercase tracking-[0.18em] text-ink-600">Loading your workspace context…</span>
+            </div>
+          </div>
+        )}
+
+        {!profileLoading && profile && (
+          <div className="mt-8 border border-ink-800 bg-ink-900">
+            <div className="flex flex-col gap-5 border-b border-ink-800 px-5 py-5 sm:flex-row sm:items-start sm:justify-between sm:px-6">
+              <div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <p className="font-display text-2xl text-ink-100">{profile.employee.name}</p>
+                  <span className="border border-ink-700 px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-500">
+                    {role === "admin" ? "ADMIN" : "MEMBER"}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-ink-600">
+                  Signed in as {username || "authenticated user"} · Employee #{profile.employee.id}
+                </p>
+              </div>
+              <div className="text-left sm:text-right">
+                <p className="text-[9px] uppercase tracking-[0.2em] text-ink-700">Access scope</p>
+                <p className="mt-1 text-xs font-semibold uppercase tracking-[0.12em] text-accent-400">
+                  {role === "admin" ? "Your reporting hierarchy" : "Your employee record"}
+                </p>
+              </div>
+            </div>
+
+            <div className="grid divide-y divide-ink-800 sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
+              {[
+                ["Department", profile.department.name],
+                ["Location", profile.department.location],
+                ["Manager", profile.manager?.name || "Not assigned"],
+                [role === "admin" ? "Direct reports" : "Joined", role === "admin"
+                  ? String(profile.directReports)
+                  : new Date(profile.employee.hireDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })],
+              ].map(([label, value]) => (
+                <div key={label} className="px-5 py-4 sm:px-6">
+                  <p className="text-[9px] uppercase tracking-[0.18em] text-ink-700">{label}</p>
+                  <p className="mt-1 text-sm text-ink-200">{value}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-ink-800 px-5 py-3 sm:px-6">
+              {profile.address && (
+                <span className="text-[10px] text-ink-600">
+                  Address · {profile.address.city}, {profile.address.state} {profile.address.pinCode}
+                </span>
+              )}
+              {profile.salary && (
+                <span className="text-[10px] text-ink-600">
+                  Current salary · {profile.salary.currency} {Number(profile.salary.amount).toLocaleString("en-IN")}
+                </span>
+              )}
+              <span className="ml-auto text-[9px] uppercase tracking-[0.16em] text-ink-700">
+                Loaded from PostgreSQL
+              </span>
+            </div>
+          </div>
+        )}
+
+        {!profileLoading && profileError && (
+          <div className="mt-8 border border-amber-800/50 bg-amber-950/10 px-5 py-4">
+            <p className="text-[10px] uppercase tracking-[0.18em] text-amber-400">Workspace profile</p>
+            <p className="mt-1 text-xs text-ink-500">{profileError} Your database query workspace is still available.</p>
+          </div>
+        )}
 
         <div className="mt-10 grid gap-8 lg:grid-cols-[1fr_260px] lg:items-start">
           <div>
