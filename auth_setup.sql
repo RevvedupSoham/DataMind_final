@@ -55,6 +55,10 @@ on conflict (username) do nothing;
 -- ---------------------------------------------------------------------
 -- verify_admin_login: Returns employee_id on success, NULL on failure
 -- ---------------------------------------------------------------------
+-- Dropped first: older installs of this function returned `boolean`,
+-- and Postgres refuses CREATE OR REPLACE when the return type changes.
+drop function if exists verify_admin_login(text, text);
+
 create or replace function verify_admin_login(p_username text, p_password text)
 returns int4
 language plpgsql
@@ -79,6 +83,10 @@ grant execute on function verify_admin_login(text, text) to service_role;
 -- ---------------------------------------------------------------------
 -- verify_member_login: Returns employee_id on success, NULL on failure
 -- ---------------------------------------------------------------------
+-- Dropped first: older installs of this function returned `boolean`,
+-- and Postgres refuses CREATE OR REPLACE when the return type changes.
+drop function if exists verify_member_login(text, text);
+
 create or replace function verify_member_login(p_username text, p_password text)
 returns int4
 language plpgsql
@@ -105,6 +113,8 @@ grant execute on function verify_member_login(text, text) to service_role;
 -- Includes: self, direct reports, indirect reports (unlimited depth)
 -- WITH cycle protection
 -- ---------------------------------------------------------------------
+drop function if exists get_hierarchy(int4);
+
 create or replace function get_hierarchy(p_employee_id int4)
 returns table(employee_id int4)
 language sql
@@ -135,6 +145,8 @@ grant execute on function get_hierarchy(int4) to service_role;
 -- Returns: {authorized: boolean, reason: text, modified_sql: text}
 -- This function analyzes the query and enforces access policies
 -- ---------------------------------------------------------------------
+drop function if exists check_query_authorization(text, text, int4);
+
 create or replace function check_query_authorization(
   p_sql text,
   p_role text,
@@ -249,6 +261,8 @@ grant execute on function check_query_authorization(text, text, int4) to service
 -- execute_authorized_sql: Executes read-only SQL with authorization checks
 -- This replaces execute_readonly_sql for authorized queries
 -- ---------------------------------------------------------------------
+drop function if exists execute_authorized_sql(text, text, int4);
+
 create or replace function execute_authorized_sql(
   p_sql text,
   p_role text,
@@ -293,6 +307,8 @@ grant execute on function execute_authorized_sql(text, text, int4) to service_ro
 -- ---------------------------------------------------------------------
 -- execute_privileged_sql: Admin writes (with authorization enforcement)
 -- ---------------------------------------------------------------------
+drop function if exists execute_privileged_sql(text, text, int4);
+
 create or replace function execute_privileged_sql(
   p_sql text,
   p_role text,
