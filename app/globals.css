@@ -7,19 +7,24 @@
     scroll-behavior: smooth;
   }
 
+  body {
+    overflow-x: hidden;
+  }
+
   ::selection {
     background-color: theme("colors.accent.500");
     color: theme("colors.ink.950");
   }
 
-  /* Thin, editorial scrollbars for the SQL viewer / table overflow */
   .scroll-thin::-webkit-scrollbar {
     height: 8px;
     width: 8px;
   }
+
   .scroll-thin::-webkit-scrollbar-track {
     background: transparent;
   }
+
   .scroll-thin::-webkit-scrollbar-thumb {
     background-color: theme("colors.ink.600");
     border-radius: 999px;
@@ -28,19 +33,27 @@
 
 @layer components {
   .section {
-    @apply mx-auto w-full max-w-6xl px-6 md:px-10;
+    @apply mx-auto w-full max-w-7xl px-5 sm:px-6 lg:px-10;
   }
 
   .eyebrow {
-    @apply text-xs font-semibold uppercase tracking-widest2 text-accent-400;
+    @apply text-[10px] font-semibold uppercase tracking-[0.22em] text-accent-400;
   }
 
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 rounded-sm bg-accent-500 px-7 py-3.5 text-sm font-semibold uppercase tracking-wider text-ink-950 transition-colors duration-200 hover:bg-accent-400 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-2 rounded-sm bg-accent-500 px-6 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-ink-950 transition-all duration-200 hover:bg-accent-300 hover:shadow-[0_0_28px_rgba(79,214,198,0.12)] disabled:cursor-not-allowed disabled:opacity-50;
   }
 
   .btn-ghost {
-    @apply inline-flex items-center justify-center gap-2 rounded-sm border border-ink-600 px-7 py-3.5 text-sm font-semibold uppercase tracking-wider text-ink-100 transition-colors duration-200 hover:border-accent-400 hover:text-accent-400;
+    @apply inline-flex items-center justify-center gap-2 rounded-sm border border-ink-700 px-6 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-ink-200 transition-all duration-200 hover:border-ink-500 hover:bg-ink-900 hover:text-ink-100 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .hairline {
+    @apply border-ink-800;
+  }
+
+  .data-panel {
+    @apply rounded-sm border border-ink-800 bg-ink-900/70;
   }
 }
 
