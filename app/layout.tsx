@@ -29,9 +29,25 @@ export const metadata: Metadata = {
     "Turn natural-language questions into real PostgreSQL queries and explore the answers directly from your database.",
 };
 
+const themeScript = `
+(function () {
+  try {
+    var saved = localStorage.getItem("datamind-theme");
+    var theme = saved === "light" || saved === "dark"
+      ? saved
+      : (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+    document.documentElement.classList.toggle("theme-light", theme === "light");
+    document.documentElement.style.colorScheme = theme;
+  } catch (_) {}
+})();
+`;
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${display.variable} ${sans.variable} ${mono.variable}`}>
+    <html lang="en" suppressHydrationWarning className={`${display.variable} ${sans.variable} ${mono.variable}`}>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+      </head>
       <body className="bg-ink-950 text-ink-100 font-sans antialiased">{children}</body>
     </html>
   );
