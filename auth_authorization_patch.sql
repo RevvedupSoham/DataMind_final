@@ -82,6 +82,7 @@ declare
   has_or boolean;
   own_hierarchy boolean;
   any_hierarchy boolean;
+  foreign_hierarchy boolean;
 begin
   if p_role not in ('admin','member') or p_employee_id is null or p_employee_id <= 0 then
     return jsonb_build_object('authorized',false,'reason','Invalid authorization context.');
@@ -160,7 +161,7 @@ begin
 
     if has_salary or has_address or has_history then
       -- If get_hierarchy(...) is used, it MUST be this admin's hierarchy.
-      if any_hierarchy and not own_hierarchy then
+      if foreign_hierarchy then
         return jsonb_build_object(
           'authorized',false,
           'reason','This admin query references another administrator hierarchy.'
@@ -296,11 +297,18 @@ begin
   is_read := s ~ '^\s*(select|with)(\s|$)';
   if is_read then
     -- Reads use the same per-account hierarchy authorization as the read RPC.
-    return query execute format(
-      'select to_json(t) from (%s) t',
-      (check_query_authorization(p_sql,'admin',p_employee_id)->>'modified_sql')
-    );
-    return;
+    declare
+      read_auth jsonb;
+      read_sql text;
+    begin
+      read_auth := check_query_authorization(p_sql,'admin',p_employee_id);
+      if not coalesce((read_auth->>'authorized')::boolean,false) then
+        raise exception '%',read_auth->>'reason';
+      end if;
+      read_sql := read_auth->>'modified_sql';
+      return query execute format('select to_json(t) from (%s) t',read_sql);
+      return;
+    end;
   end if;
 
   if s ~ '^\s*(create|drop|alter|truncate)\M' then
