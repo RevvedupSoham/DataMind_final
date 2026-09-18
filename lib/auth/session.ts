@@ -6,10 +6,10 @@ import type { SessionPayload, UserRole } from "@/types/auth";
  * Node.js API route runtime AND the Edge runtime used by middleware.ts.
  * Web Crypto (`crypto.subtle`) is available in both.
  *
- * The cookie carries {username, role, iat, exp} and an HMAC-SHA256
+ * The cookie carries {username, role, employeeId, iat, exp} and an HMAC-SHA256
  * signature over that payload, keyed by SESSION_SECRET. Nothing about the
- * role is ever trusted from anywhere else — every privileged action reads
- * the role back out of this verified token server-side.
+ * role or employeeId is ever trusted from anywhere else — every privileged 
+ * action reads these back out of this verified token server-side.
  */
 
 export const SESSION_COOKIE_NAME = "datamind_session";
@@ -65,11 +65,16 @@ async function getHmacKey(): Promise<CryptoKey> {
   );
 }
 
-export async function createSessionToken(username: string, role: UserRole): Promise<string> {
+export async function createSessionToken(
+  username: string, 
+  role: UserRole, 
+  employeeId: number
+): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   const payload: SessionPayload = {
     username,
     role,
+    employeeId,
     iat: now,
     exp: now + SESSION_TTL_SECONDS,
   };
@@ -113,6 +118,7 @@ export async function verifySessionToken(token: string | undefined | null): Prom
       return null; // expired
     }
     if (payload.role !== "admin" && payload.role !== "member") return null;
+    if (typeof payload.employeeId !== "number" || payload.employeeId <= 0) return null;
 
     return payload;
   } catch {

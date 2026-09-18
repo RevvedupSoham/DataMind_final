@@ -31,18 +31,30 @@ export async function POST(req: NextRequest) {
   // The panel selected on the login screen determines which table gets
   // checked — verify_admin_login only ever queries admin_users, and
   // verify_member_login only ever queries member_users (see
-  // auth_setup.sql). There is no cross-table fallback: if the credentials
-  // don't match a row in that specific table, this fails, even if the same
-  // username/password would succeed against the other table.
-  const role = await verifyCredentials(username.trim(), password, panel);
+  // auth_setup.sql). The RPC now returns employee_id on success.
+  const result = await verifyCredentials(username.trim(), password, panel);
 
-  if (!role) {
+  if (!result) {
     return NextResponse.json({ error: "Incorrect username or password." }, { status: 401 });
   }
 
-  const token = await createSessionToken(username.trim(), role);
+  const { role, employeeId } = result;
 
-  const response = NextResponse.json({ username: username.trim(), role });
+  // Verify that the user is mapped to an employee
+  if (!employeeId) {
+    return NextResponse.json({ 
+      error: "Your account is not mapped to an employee. Contact your administrator." 
+    }, { status: 403 });
+  }
+
+  const token = await createSessionToken(username.trim(), role, employeeId);
+
+  const response = NextResponse.json({ 
+    username: username.trim(), 
+    role,
+    employeeId 
+  });
+  
   response.cookies.set(SESSION_COOKIE_NAME, token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",

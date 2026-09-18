@@ -3,6 +3,8 @@ export type UserRole = "admin" | "member";
 export interface SessionPayload {
   username: string;
   role: UserRole;
+  /** Employee ID this user is mapped to (for authorization) */
+  employeeId: number;
   /** Unix seconds. */
   iat: number;
   /** Unix seconds. */
@@ -26,4 +28,5 @@ export interface LoginRequestBody {
 export interface SessionUser {
   username: string;
   role: UserRole;
+  employeeId: number;
 }

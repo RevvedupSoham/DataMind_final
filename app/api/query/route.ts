@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateSqlFromQuestion, LlmError } from "@/lib/llm/groq";
 import { validateSql } from "@/lib/sql/validator";
-import { executeReadonlyQuery, DatabaseError } from "@/lib/database/supabase";
+import { executeReadonlyQuery, DatabaseError, AuthorizationError } from "@/lib/database/supabase";
 import { getVisualizationOptions, isVisualizationRenderable } from "@/lib/visualization/engine";
 import { verifySessionToken, SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import type { QueryErrorResponse, QueryPendingConfirmation, QueryResponse } from "@/types/query";
@@ -22,13 +22,15 @@ function errorResponse(
 export async function POST(req: NextRequest) {
   // Middleware already blocks unauthenticated requests to /api/* routes,
   // but this route re-verifies the session itself rather than trusting
-  // that middleware ran — the role decision below is security-sensitive.
+  // that middleware ran — the role and employeeId decisions below are security-sensitive.
   const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
   const session = await verifySessionToken(token);
   if (!session) {
     return errorResponse("auth", "Please log in.", 401);
   }
-  const allowWrites = session.role === "admin";
+  
+  const { role, employeeId } = session;
+  const allowWrites = role === "admin";
 
   let body: unknown;
   try {
@@ -52,7 +54,7 @@ export async function POST(req: NextRequest) {
 
   // 1. Natural language -> SQL, via Groq (openai/gpt-oss-120b). The system
   //    prompt itself differs by role (see lib/sql/schema.ts), but the real
-  //    permission boundary is the validator in step 2, not this prompt.
+  //    permission boundary is the validator in step 2 and authorization in step 4.
   let generated;
   try {
     generated = await generateSqlFromQuestion(question.trim(), allowWrites);
@@ -91,11 +93,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(pending, { status: 200 });
   }
 
-  // 4. Execute the read-only statement against the real Supabase Postgres database.
+  // 4. Execute the read-only statement against the real Supabase Postgres database
+  //    with authorization enforcement based on role and employeeId
   let result;
   try {
-    result = await executeReadonlyQuery(validation.sql);
+    result = await executeReadonlyQuery(validation.sql, role, employeeId);
   } catch (err) {
+    if (err instanceof AuthorizationError) {
+      console.warn("[DataMind] Authorization error:", err.message);
+      return errorResponse("authorization", err.message, 403);
+    }
     if (err instanceof DatabaseError) {
       console.error("[DataMind] Database error:", err.message);
       return errorResponse("database", err.message, 502);
