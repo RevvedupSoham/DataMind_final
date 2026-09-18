@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
   //    permission boundary is the validator in step 2 and authorization in step 4.
   let generated;
   try {
-    generated = await generateSqlFromQuestion(question.trim(), allowWrites);
+    generated = await generateSqlFromQuestion(question.trim(), allowWrites, { role, employeeId });
   } catch (err) {
     if (err instanceof LlmError) {
       console.error("[DataMind] LLM error:", err.message);

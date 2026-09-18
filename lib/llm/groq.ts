@@ -100,7 +100,8 @@ function parseStructuredResponse(text: string): GeneratedSQL {
  */
 export async function generateSqlFromQuestion(
   question: string,
-  allowWrites = false
+  allowWrites = false,
+  userContext?: { role: "admin" | "member"; employeeId: number }
 ): Promise<GeneratedSQL> {
   const apiKey = process.env.GROQ_API_KEY;
 
@@ -109,7 +110,7 @@ export async function generateSqlFromQuestion(
   }
 
   const model = process.env.GROQ_MODEL || DEFAULT_MODEL;
-  const systemPrompt = buildSqlSystemPrompt(allowWrites);
+  const systemPrompt = buildSqlSystemPrompt(allowWrites, userContext);
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);

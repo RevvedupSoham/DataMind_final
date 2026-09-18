@@ -201,16 +201,30 @@ begin
         -- Allow other aggregates (counts, department stats, etc.)
         return jsonb_build_object('authorized', true, 'modified_sql', p_sql);
       else
-        -- Individual access: must be restricted to self
-        -- For now, reject if no WHERE clause (POLICY 10: reject, don't auto-filter)
+        -- Individual access must contain the authenticated employee ID.
+        -- DataMind uses custom authentication, so Supabase auth.uid() is not
+        -- available here. The verified session employee_id is passed into this
+        -- security-definer RPC and must appear in the generated SQL.
         if not v_has_where then
           return jsonb_build_object(
             'authorized', false,
-            'reason', 'Members can only access their own employee information. This query must specify your employee ID.'
+            'reason', 'Members can only access their own employee information.'
           );
         end if;
-        -- Query has WHERE - we'll let it execute and trust database will handle it
-        -- The application layer should inject employee_id filters
+
+        if not (
+          v_sql_lower ~ ('employee\\.id\\s*=\\s*' || p_employee_id || '\\y')
+          or v_sql_lower ~ ('salary\\.employee_id\\s*=\\s*' || p_employee_id || '\\y')
+          or v_sql_lower ~ ('address\\.employee_id\\s*=\\s*' || p_employee_id || '\\y')
+          or v_sql_lower ~ ('job_history\\.employee_id\\s*=\\s*' || p_employee_id || '\\y')
+          or v_sql_lower ~ ('dept_assignment\\.employee_id\\s*=\\s*' || p_employee_id || '\\y')
+        ) then
+          return jsonb_build_object(
+            'authorized', false,
+            'reason', 'Members can only access records belonging to their own employee account.'
+          );
+        end if;
+
         return jsonb_build_object('authorized', true, 'modified_sql', p_sql);
       end if;
     end if;
@@ -242,7 +256,23 @@ begin
       );
     end if;
     
-    -- Allow admin queries (app layer will enforce hierarchy)
+    -- Sensitive admin reads must be scoped to the authenticated hierarchy.
+    if v_has_salary or v_has_address or v_has_job_history then
+      if not (
+        v_sql_lower ~ ('get_hierarchy\\s*\\(\\s*' || p_employee_id || '\\s*\\)')
+        or v_sql_lower ~ ('employee\\.id\\s*=\\s*' || p_employee_id || '\\y')
+        or v_sql_lower ~ ('employee\\.id\\s+in\\s*\\(.*get_hierarchy')
+        or v_sql_lower ~ ('salary\\.employee_id\\s*=\\s*' || p_employee_id || '\\y')
+        or v_sql_lower ~ ('address\\.employee_id\\s*=\\s*' || p_employee_id || '\\y')
+        or v_sql_lower ~ ('job_history\\.employee_id\\s*=\\s*' || p_employee_id || '\\y')
+      ) then
+        return jsonb_build_object(
+          'authorized', false,
+          'reason', 'Admin access must be restricted to the authenticated employee hierarchy.'
+        );
+      end if;
+    end if;
+
     return jsonb_build_object('authorized', true, 'modified_sql', p_sql);
   end if;
   
