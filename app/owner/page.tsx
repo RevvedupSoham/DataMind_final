@@ -9,6 +9,7 @@ interface OperationPlan {
   requiresConfirmation: boolean;
   allowed: boolean;
   explanation: string;
+  approvalToken?: string;
 }
 
 export default function OwnerControlRoomPage() {
@@ -19,11 +20,13 @@ export default function OwnerControlRoomPage() {
   const [result, setResult] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmed, setConfirmed] = useState(false);
 
   async function generatePlan() {
     setLoading(true);
     setError(null);
     setResult(null);
+    setConfirmed(false);
 
     setExecutionStage("reasoning");
 
@@ -91,6 +94,8 @@ export default function OwnerControlRoomPage() {
         },
         body: JSON.stringify({
           sql: plan.generatedSql,
+          approvalToken: plan.approvalToken,
+          confirmed,
         }),
       });
 
@@ -152,15 +157,38 @@ export default function OwnerControlRoomPage() {
             </button>
 
             {plan?.generatedSql && (
-              <button
-                onClick={executePlan}
-                className="rounded-lg border border-cyan-500 px-5 py-3"
-              >
-                Execute Approved Operation
-              </button>
+              <div className="flex flex-col gap-3">
+                {plan.requiresConfirmation && (
+                  <label className="flex max-w-xl items-start gap-3 text-sm text-cyan-100">
+                    <input
+                      type="checkbox"
+                      checked={confirmed}
+                      onChange={(e) => setConfirmed(e.target.checked)}
+                      className="mt-1 h-4 w-4 accent-cyan-500"
+                    />
+                    <span>
+                      I reviewed the generated SQL and understand that this
+                      operation will change the live database.
+                    </span>
+                  </label>
+                )}
+                <button
+                  onClick={executePlan}
+                  disabled={plan.requiresConfirmation && !confirmed}
+                  className="rounded-lg border border-cyan-500 px-5 py-3 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {plan.requiresConfirmation ? "Confirm & Execute Operation" : "Execute Operation"}
+                </button>
+              </div>
             )}
           </div>
         </div>
+
+        {plan && !plan.allowed && (
+          <div className="rounded-xl border border-red-500/40 bg-red-500/10 p-5 text-red-200">
+            {plan.explanation}
+          </div>
+        )}
 
         <div className="grid gap-6 lg:grid-cols-2">
           <section className="rounded-xl border border-cyan-900 bg-[#0B1720] p-6">
