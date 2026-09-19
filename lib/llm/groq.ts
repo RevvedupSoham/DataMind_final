@@ -185,7 +185,7 @@ async function callGroq(
 export async function generateSqlFromQuestion(
   question: string,
   allowWrites = false,
-  userContext?: { role: "admin" | "member"; employeeId: number }
+  userContext: { role: "admin" | "member"; employeeId: number }
 ): Promise<GeneratedSQL> {
   const systemPrompt = buildSqlSystemPrompt(allowWrites, userContext);
 

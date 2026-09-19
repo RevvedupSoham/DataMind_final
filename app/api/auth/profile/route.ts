@@ -13,6 +13,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ authenticated: false }, { status: 401 });
   }
 
+  if (session.employeeId === null) {
+    return NextResponse.json({ error: { message: "Owner accounts do not have an employee profile." } }, { status: 400 });
+  }
+
   try {
     const profile = await getEmployeeProfile(session.employeeId);
 
