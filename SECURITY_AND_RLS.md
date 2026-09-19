@@ -147,6 +147,56 @@ $2a$06$...
 
 ---
 
+# Creating OWNER Accounts
+
+OWNER accounts require application-generated `scrypt` hashes.
+
+## Generate OWNER Password Hash
+
+Example helper script:
+
+```ts
+import { hashPassword } from "@/lib/auth/password";
+
+async function main() {
+  const hash = await hashPassword("YOUR_OWNER_PASSWORD");
+  console.log(hash);
+}
+
+main();
+```
+
+Run:
+
+```bash
+npx tsx scripts/generate-owner-hash.ts
+```
+
+Output format:
+
+```text
+salt:hash
+```
+
+---
+
+## Insert OWNER User
+
+```sql
+insert into owner_users (
+  username,
+  password_hash,
+  display_name
+)
+values (
+  'OWNER',
+  'PASTE_GENERATED_SCRYPT_HASH_HERE',
+  'Primary Owner'
+);
+```
+
+---
+
 # Authentication Architecture Summary
 
 | Role Type | Authentication Model |
