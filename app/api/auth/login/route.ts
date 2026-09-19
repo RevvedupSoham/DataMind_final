@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyCredentials } from "@/lib/database/supabase";
+import { DatabaseError, verifyCredentials } from "@/lib/database/supabase";
 import {
   createSessionToken,
   SESSION_COOKIE_MAX_AGE_SECONDS,
@@ -32,7 +32,23 @@ export async function POST(req: NextRequest) {
   // checked — verify_admin_login only ever queries admin_users, and
   // verify_member_login only ever queries member_users (see
   // auth_setup.sql). The RPC now returns employee_id on success.
-  const result = await verifyCredentials(username.trim(), password, panel);
+  let result: Awaited<ReturnType<typeof verifyCredentials>>;
+
+  try {
+    result = await verifyCredentials(username.trim(), password, panel);
+  } catch (error) {
+    console.error("[DataMind] Login verification failed:", error);
+
+    return NextResponse.json(
+      {
+        error:
+          error instanceof DatabaseError
+            ? error.message
+            : "The authentication service is temporarily unavailable.",
+      },
+      { status: 503 }
+    );
+  }
 
   if (!result) {
     return NextResponse.json({ error: "Incorrect username or password." }, { status: 401 });

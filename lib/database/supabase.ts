@@ -319,7 +319,16 @@ export async function verifyCredentials(
 
   if (error) {
     console.error(`[DataMind] ${rpcName} RPC error:`, error.message);
-    return null;
+
+    if (/function .* does not exist|could not find the function|schema cache/i.test(error.message)) {
+      throw new DatabaseError(
+        "DataMind authentication is not initialized. Run auth_setup.sql in the Supabase SQL Editor, then try again."
+      );
+    }
+
+    throw new DatabaseError(
+      "DataMind could not verify the credentials because the authentication database is unavailable."
+    );
   }
 
   // The RPC now returns employee_id (int4) on success, NULL on failure
