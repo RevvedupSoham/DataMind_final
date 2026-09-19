@@ -103,7 +103,7 @@ function LoginForm() {
               </div>
 
               <div className="mb-7 grid grid-cols-2 border border-ink-700 bg-ink-950 p-1">
-                {(["member", "admin"] as UserRole[]).map((r) => (
+                {(["member", "admin", "owner"] as UserRole[]).map((r) => (
                   <button
                     key={r}
                     type="button"
@@ -113,7 +113,7 @@ function LoginForm() {
                       (panel === r ? "bg-accent-500 text-ink-950" : "text-ink-500 hover:text-ink-100")
                     }
                   >
-                    {r === "admin" ? "Admin" : "Member"}
+                    {r === "owner" ? "Owner" : r === "admin" ? "Admin" : "Member"}
                   </button>
                 ))}
               </div>
@@ -129,7 +129,7 @@ function LoginForm() {
                     onChange={(e) => setUsername(e.target.value)}
                     required
                     className="w-full border border-ink-700 bg-ink-950 px-4 py-3.5 text-sm text-ink-100 placeholder:text-ink-700 outline-none transition-colors focus:border-accent-400"
-                    placeholder={panel === "admin" ? "admin" : "member"}
+                    placeholder={panel === "owner" ? "owner" : panel === "admin" ? "admin" : "member"}
                   />
                 </div>
 
