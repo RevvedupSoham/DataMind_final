@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyCredentials } from "@/lib/database/supabase";
 import {
   createSessionToken,
-  SESSION_COOKIE_MAX_AGE_SECONDS,
   SESSION_COOKIE_NAME,
 } from "@/lib/auth/session";
 import type { LoginRequestBody } from "@/types/auth";
@@ -60,7 +59,6 @@ export async function POST(req: NextRequest) {
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: "/",
-    maxAge: SESSION_COOKIE_MAX_AGE_SECONDS,
   });
 
   return response;
