@@ -149,6 +149,53 @@ export function Navigation() {
   }, []);
 
   useEffect(() => {
+    if (!session) return;
+
+    let lastActivity = Date.now();
+    let activityTimer: ReturnType<typeof setTimeout> | null = null;
+    let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+
+    const markActivity = () => {
+      lastActivity = Date.now();
+
+      if (activityTimer) clearTimeout(activityTimer);
+      activityTimer = setTimeout(() => {
+        void fetch("/api/auth/logout", { method: "POST" }).finally(() => {
+          router.push("/login");
+          router.refresh();
+        });
+      }, 30 * 60 * 1000);
+    };
+
+    const activityEvents = ["pointerdown", "keydown", "touchstart", "scroll", "mousemove"];
+    activityEvents.forEach((event) => window.addEventListener(event, markActivity, { passive: true }));
+    markActivity();
+
+    // Refresh the signed token while the user is actively using the app.
+    // If there has been no activity for 10 minutes, let the existing token
+    // continue toward expiry instead of keeping an unattended session alive.
+    heartbeatTimer = setInterval(() => {
+      const recentlyActive = Date.now() - lastActivity < 10 * 60 * 1000;
+      if (document.visibilityState === "visible" && recentlyActive) {
+        void fetch("/api/auth/heartbeat", { method: "POST" })
+          .then((res) => {
+            if (res.status === 401) {
+              router.push("/login");
+              router.refresh();
+            }
+          })
+          .catch(() => undefined);
+      }
+    }, 5 * 60 * 1000);
+
+    return () => {
+      activityEvents.forEach((event) => window.removeEventListener(event, markActivity));
+      if (activityTimer) clearTimeout(activityTimer);
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
+    };
+  }, [session, router]);
+
+  useEffect(() => {
     let cancelled = false;
     fetch("/api/auth/me")
       .then((res) => (res.ok ? res.json() : null))

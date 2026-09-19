@@ -27,6 +27,9 @@ const SUPPORTED_TYPES: ChartType[] = ["bar", "line", "pie"];
  * every entry is independently valid — order is only a display hint.
  */
 export function getVisualizationOptions(result: QueryResult, question: string): VisualizationConfig[] {
+  // Every multi-row result gets the same four switchable views:
+  // Table, Bar, Line, and Pie. The chart views all reuse the exact returned
+  // rows. A numeric measure is required for meaningful chart rendering.
   if (result.rowCount < 2 || result.columns.length < 2) return [];
 
   const numericFields = result.columns.filter((c) => result.columnTypes[c] === "number");
@@ -35,90 +38,57 @@ export function getVisualizationOptions(result: QueryResult, question: string): 
 
   if (numericFields.length === 0) return [];
 
-  // Prefer a numeric measure that is not the likely x-axis field.
-  // For results such as year + employee_count, this lets the year drive
-  // the line chart while employee_count becomes the plotted measure.
-  const numericX = numericFields.find((field) => {
-    const values = result.rows
-      .map((row) => row[field])
-      .filter((value) => value !== null && value !== undefined)
-      .map(Number)
-      .filter(Number.isFinite);
-    const distinct = new Set(values).size;
-    return distinct >= 2 && distinct <= Math.min(100, result.rowCount);
-  });
-
-  const yField = numericFields.find((field) => field !== numericX) ?? numericFields[0];
-  if (!yField) return [];
-
-  const title = titleize(question);
-  let xField: string;
-  let candidateTypes: ChartType[];
-
   const firstDate = dateFields[0];
+  const firstString = stringFields[0];
 
-  if (firstDate) {
-    // Dates represent ordered progression, so line is the primary
-    // visualization. Bar remains available for discrete date buckets.
-    xField = firstDate;
-    candidateTypes = ["line", "bar"];
-  } else {
-    const firstString = stringFields[0];
-
-    if (firstString) {
-      xField = firstString;
-      const distinctCategories = new Set(
+  // Prefer a categorical/date field for the x-axis. If the query returns
+  // only numeric columns, use a low-cardinality numeric field as x.
+  let xField: string | null = firstDate ?? firstString ?? null;
+  if (!xField) {
+    xField = numericFields.find((field) => {
+      const distinct = new Set(
         result.rows
-          .map((r) => r[xField])
+          .map((row) => row[field])
           .filter((value) => value !== null && value !== undefined)
           .map(String)
       ).size;
-
-      if (distinctCategories < 2 || distinctCategories > 25) return [];
-
-      // Categorical results can be compared with bars. A pie is exposed
-      // only when the number of categories is small enough to remain readable.
-      candidateTypes = distinctCategories <= 8 ? ["bar", "pie"] : ["bar"];
-    } else if (numericX && numericX !== yField) {
-      // Aggregated years/month numbers often arrive as integers rather than
-      // dates. Treat a low-cardinality numeric x-axis as an ordered series so
-      // questions such as "plot hiring over the last five years" get a line.
-      xField = numericX;
-      candidateTypes = ["line", "bar"];
-    } else {
-      return [];
-    }
+      return distinct >= 2 && distinct <= Math.min(100, result.rowCount);
+    }) ?? null;
   }
 
-  // Reorder so a chart type explicitly requested by the question appears
-  // first. This changes display order only, never authorization or data.
+  if (!xField) return [];
+
+  const yField = numericFields.find((field) => field !== xField) ?? numericFields[0];
+  if (!yField) return [];
+
+  const title = titleize(question);
+
+  // All three chart configurations are returned deliberately. ResultView
+  // exposes them as buttons, and ChartRenderer uses the same x/y fields and
+  // same database rows for each selected view.
+  const allTypes: ChartType[] = ["bar", "line", "pie"];
+
+  // Keep an explicitly requested visualization first, while still exposing
+  // all three buttons.
   const wantsPie = /\bpie\b|\bshare\b|\bproportion\b/i.test(question);
   const wantsLine = /\bline\b|\btrend\b|\bover time\b|\bplot\b|\bhistory\b|\bgrowth\b/i.test(question);
   const wantsBar = /\bbar chart\b|\bcompare\b|\bcomparison\b/i.test(question);
 
-  const priority: ChartType[] = wantsPie
-    ? ["pie"]
-    : wantsLine
-      ? ["line"]
-      : wantsBar
-        ? ["bar"]
-        : [];
-
+  const priority: ChartType[] = wantsPie ? ["pie"] : wantsLine ? ["line"] : wantsBar ? ["bar"] : [];
   const ordered = [
-    ...priority.filter((t) => candidateTypes.includes(t)),
-    ...candidateTypes.filter((t) => !priority.includes(t)),
+    ...priority,
+    ...allTypes.filter((type) => !priority.includes(type)),
   ];
 
-  return ordered
-    .filter((chartType) => SUPPORTED_TYPES.includes(chartType))
-    .map((chartType) => ({
-      shouldVisualize: true,
-      chartType,
-      xField,
-      yField,
-      title,
-    }));
+  return ordered.map((chartType) => ({
+    shouldVisualize: true,
+    chartType,
+    xField,
+    yField,
+    title,
+  }));
 }
+
 function titleize(question: string): string {
   const trimmed = question.trim().replace(/[.?!]+$/, "");
   return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
