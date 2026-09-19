@@ -1,13 +1,13 @@
 const HARD_BLOCK_PATTERNS = [
-  /\\b(grant|revoke|merge|call|execute|vacuum|copy|listen|notify|comment)\\b/i,
-  /\\balter\\s+system\\b/i,
-  /\\b(create|alter|drop)\\s+(role|user|policy|trigger|function|procedure|extension)\\b/i,
-  /\\bdrop\\s+database\\b/i,
-  /\\bcopy\\b.*\\bprogram\\b/i,
-  /\\bpg_sleep\\s*\\(/i,
-  /\\b(pg_read_file|pg_ls_dir|pg_reload_conf|lo_import|lo_export|dblink_exec|pg_terminate_backend|pg_cancel_backend)\\b/i,
-  /\\b(information_schema\\.role|pg_catalog\\.pg_authid)\\b/i,
-  /\\b(admin_users|member_users|owner_users)\\b/i,
+  /\b(grant|revoke|merge|call|execute|vacuum|copy|listen|notify|comment)\b/i,
+  /\balter\s+system\b/i,
+  /\b(create|alter|drop)\s+(role|user|policy|trigger|function|procedure|extension)\b/i,
+  /\bdrop\s+database\b/i,
+  /\bcopy\b.*\bprogram\b/i,
+  /\bpg_sleep\s*\(/i,
+  /\b(pg_read_file|pg_ls_dir|pg_reload_conf|lo_import|lo_export|dblink_exec|pg_terminate_backend|pg_cancel_backend)\b/i,
+  /\b(information_schema\.role|pg_catalog\.pg_authid)\b/i,
+  /\b(admin_users|member_users|owner_users)\b/i,
 ];
 
 export interface SqlValidationResult {
@@ -141,9 +141,9 @@ export function validateSqlSafety(sql: string): SqlValidationResult {
     };
   }
 
-  const statement = analysisSql.replace(/;\\s*$/, "").trim();
+  const statement = analysisSql.replace(/;\s*$/, "").trim();
 
-  if (/^with\\b/i.test(statement) && /\\b(insert|update|delete|create|alter|drop|truncate)\\b/i.test(statement)) {
+  if (/^with\b/i.test(statement) && /\b(insert|update|delete|create|alter|drop|truncate)\b/i.test(statement)) {
     return {
       valid: false,
       blockedReason:
@@ -153,7 +153,7 @@ export function validateSqlSafety(sql: string): SqlValidationResult {
     };
   }
 
-  if (!/^(select|with|insert|update|delete|create|alter|drop|truncate)\\b/i.test(statement)) {
+  if (!/^(select|with|insert|update|delete|create|alter|drop|truncate)\b/i.test(statement)) {
     return {
       valid: false,
       blockedReason:
@@ -174,7 +174,7 @@ export function validateSqlSafety(sql: string): SqlValidationResult {
     }
   }
 
-  if (/^(update|delete)\\b/i.test(statement) && !/\\bwhere\\b/i.test(statement)) {
+  if (/^(update|delete)\b/i.test(statement) && !/\bwhere\b/i.test(statement)) {
     return {
       valid: false,
       blockedReason:
@@ -184,7 +184,7 @@ export function validateSqlSafety(sql: string): SqlValidationResult {
     };
   }
 
-  if (/^truncate\\b/i.test(statement)) {
+  if (/^truncate\b/i.test(statement)) {
     return {
       valid: true,
       riskLevel: "critical",
@@ -192,7 +192,7 @@ export function validateSqlSafety(sql: string): SqlValidationResult {
     };
   }
 
-  if (/^drop\\b/i.test(statement)) {
+  if (/^drop\b/i.test(statement)) {
     return {
       valid: true,
       riskLevel: "critical",
@@ -200,7 +200,7 @@ export function validateSqlSafety(sql: string): SqlValidationResult {
     };
   }
 
-  if (/^(delete|update|alter)\\b/i.test(statement)) {
+  if (/^(delete|update|alter)\b/i.test(statement)) {
     return {
       valid: true,
       riskLevel: "high",
@@ -208,7 +208,7 @@ export function validateSqlSafety(sql: string): SqlValidationResult {
     };
   }
 
-  if (/^(insert|create)\\b/i.test(statement)) {
+  if (/^(insert|create)\b/i.test(statement)) {
     return {
       valid: true,
       riskLevel: "medium",
