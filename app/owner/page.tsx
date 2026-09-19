@@ -18,86 +18,143 @@ export default function OwnerControlRoomPage() {
   const [timeline, setTimeline] = useState<string[]>([]);
   const [result, setResult] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function generatePlan() {
     setLoading(true);
+    setError(null);
+    setResult(null);
+
     setExecutionStage("reasoning");
+
     setTimeline([
       "Understanding owner intent",
-      "Analyzing schema and governance",
-      "Generating SQL execution strategy",
+      "Generating governed SQL",
+      "Validating governance policies",
     ]);
 
-    const response = await fetch("/api/owner/plan", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt }),
-    });
+    try {
+      const response = await fetch("/api/owner/plan", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ prompt }),
+      });
 
-    const data = await response.json();
+      const data = await response.json();
 
-    setPlan(data.plan);
-    setExecutionStage("awaiting_confirmation");
-    setTimeline((current) => [
-      ...current,
-      "Governance validation completed",
-      "Awaiting owner confirmation",
-    ]);
-    setLoading(false);
+      if (!response.ok) {
+        throw new Error(data.error || "Planning failed.");
+      }
+
+      setPlan(data.plan);
+
+      setTimeline((current) => [
+        ...current,
+        "Execution plan generated successfully",
+      ]);
+
+      setExecutionStage("awaiting_confirmation");
+    } catch (err) {
+      setExecutionStage("failed");
+
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Planning failed."
+      );
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function executePlan() {
-    if (!plan) return;
+    if (!plan?.generatedSql) {
+      setError("No generated SQL available.");
+      return;
+    }
 
     setExecutionStage("executing");
+
     setTimeline((current) => [
       ...current,
-      "Executing governed operation",
-      "Writing audit logs",
+      "Executing SQL against PostgreSQL",
+      "Persisting audit logs",
     ]);
 
-    const response = await fetch("/api/owner/execute", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sql: plan.generatedSql }),
-    });
+    try {
+      const response = await fetch("/api/owner/execute", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          sql: plan.generatedSql,
+        }),
+      });
 
-    const data = await response.json();
+      const data = await response.json();
 
-    setExecutionStage("completed");
-    setTimeline(data.timeline || []);
-    setResult(data.result?.message || "Execution completed.");
+      if (!response.ok) {
+        throw new Error(data.error || "Execution failed.");
+      }
+
+      setExecutionStage("completed");
+
+      setTimeline((current) => [
+        ...current,
+        "Database execution completed successfully",
+      ]);
+
+      setResult(
+        `Execution completed successfully. Rows affected: ${data.execution?.rowCount ?? 0}`
+      );
+    } catch (err) {
+      setExecutionStage("failed");
+
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Execution failed."
+      );
+    }
   }
 
   return (
-    <main className="min-h-screen bg-ink-950 px-6 py-10 text-white">
+    <main className="min-h-screen bg-[#071018] px-6 py-10 text-white">
       <div className="mx-auto max-w-7xl space-y-8">
         <div>
-          <p className="text-xs uppercase tracking-[0.3em] text-accent-400">
+          <p className="text-xs uppercase tracking-[0.3em] text-cyan-400">
             OWNER Runtime Console
           </p>
-          <h1 className="mt-4 text-5xl font-semibold">
+
+          <h1 className="mt-4 text-5xl font-semibold text-white">
             Governed Real-Time Execution Engine
           </h1>
         </div>
 
-        <div className="border border-ink-800 bg-ink-900/70 p-6">
+        <div className="rounded-xl border border-cyan-900 bg-[#0B1720] p-6">
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder="Create a projects table with governance tracking"
-            className="min-h-[220px] w-full resize-none bg-transparent outline-none"
+            placeholder="Create a table named project with an id and a name"
+            className="min-h-[220px] w-full resize-none bg-transparent text-white outline-none"
           />
 
           <div className="mt-6 flex gap-4">
-            <button onClick={generatePlan} className="btn-primary">
-              {loading ? "Thinking..." : "Begin Governed Execution"}
+            <button
+              onClick={generatePlan}
+              disabled={loading}
+              className="rounded-lg bg-cyan-500 px-5 py-3 font-medium text-black"
+            >
+              {loading ? "Generating..." : "Begin Governed Execution"}
             </button>
 
-            {plan && (
+            {plan?.generatedSql && (
               <button
                 onClick={executePlan}
-                className="border border-accent-400 px-5 py-3"
+                className="rounded-lg border border-cyan-500 px-5 py-3"
               >
                 Execute Approved Operation
               </button>
@@ -106,43 +163,54 @@ export default function OwnerControlRoomPage() {
         </div>
 
         <div className="grid gap-6 lg:grid-cols-2">
-          <section className="border border-ink-800 bg-ink-900/70 p-6">
-            <h2 className="text-2xl font-semibold">Execution Lifecycle</h2>
+          <section className="rounded-xl border border-cyan-900 bg-[#0B1720] p-6">
+            <h2 className="text-2xl font-semibold text-white">
+              Execution Lifecycle
+            </h2>
 
-            <div className="mt-6 space-y-4">
+            <div className="mt-6 space-y-3">
               {timeline.map((entry) => (
                 <div
                   key={entry}
-                  className="flex items-center gap-3 border border-ink-800 bg-black/20 p-4"
+                  className="flex items-center gap-3 rounded-lg border border-cyan-950 bg-black/30 p-4"
                 >
-                  <div className="h-2.5 w-2.5 rounded-full bg-accent-400" />
+                  <div className="h-2.5 w-2.5 rounded-full bg-cyan-400" />
                   <p>{entry}</p>
                 </div>
               ))}
             </div>
 
-            <div className="mt-6 border border-accent-500/30 bg-accent-500/5 p-4">
-              <p className="text-sm uppercase tracking-[0.2em] text-accent-300">
+            <div className="mt-6 rounded-lg border border-cyan-700 bg-cyan-500/10 p-4">
+              <p className="text-sm uppercase tracking-[0.2em] text-cyan-300">
                 Runtime State
               </p>
-              <p className="mt-2 text-2xl font-semibold capitalize">
+
+              <p className="mt-2 text-2xl font-semibold capitalize text-white">
                 {executionStage.replaceAll("_", " ")}
               </p>
             </div>
           </section>
 
-          <section className="border border-ink-800 bg-ink-900/70 p-6">
-            <h2 className="text-2xl font-semibold">Generated SQL</h2>
+          <section className="rounded-xl border border-cyan-900 bg-[#0B1720] p-6">
+            <h2 className="text-2xl font-semibold text-white">
+              Generated SQL
+            </h2>
 
-            <pre className="mt-6 overflow-x-auto border border-ink-800 bg-[#06111A] p-5 text-accent-300">
+            <pre className="mt-6 overflow-x-auto rounded-lg border border-cyan-950 bg-black p-5 text-cyan-300">
               <code>
-                {plan?.generatedSql || "-- SQL execution strategy will appear here"}
+                {plan?.generatedSql || "-- Awaiting generated SQL"}
               </code>
             </pre>
 
             {result && (
-              <div className="mt-6 border border-emerald-500/30 bg-emerald-500/10 p-4 text-emerald-300">
+              <div className="mt-6 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-4 text-emerald-300">
                 {result}
+              </div>
+            )}
+
+            {error && (
+              <div className="mt-6 rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-red-300">
+                {error}
               </div>
             )}
           </section>
