@@ -198,7 +198,7 @@ export function QueryInterface() {
   }
 
   return (
-    <section id="ask" className="border-t border-ink-800 bg-ink-950 py-24 sm:py-28">
+    <section id="ask" className="relative border-t border-ink-800 bg-ink-950 py-28 sm:py-36">
       <div className="section">
         <div className="flex flex-col gap-4 border-b border-ink-800 pb-8 sm:flex-row sm:items-end sm:justify-between">
           <div>
@@ -296,7 +296,7 @@ export function QueryInterface() {
         <div className="mt-10 grid gap-8 lg:grid-cols-[1fr_260px] lg:items-start">
           <div>
             <form onSubmit={(e) => { e.preventDefault(); submit(question); }}>
-              <div className="border border-ink-700 bg-ink-900 transition-colors focus-within:border-accent-400">
+              <div className="query-surface border border-ink-700 bg-ink-900 transition-colors focus-within:border-accent-400">
                 <div className="flex items-center justify-between border-b border-ink-800 px-4 py-3">
                   <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink-600">natural language</span>
                   <span className="text-[10px] text-ink-700">{question.length}/500</span>
@@ -334,7 +334,7 @@ export function QueryInterface() {
             />
 
             {history.length > 0 && (
-              <div className="mt-7 border-t border-ink-900 pt-5">
+              <div className="mt-7 border-t border-ink-900 pt-5 transition-opacity duration-500">
                 <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-ink-700">Recent questions</p>
                 <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2">
                   {history.map((q) => (
@@ -425,7 +425,7 @@ export function QueryInterface() {
         )}
 
         {status === "error" && error && (
-          <div className="mt-10 border border-red-900/50 bg-red-950/15 px-6 py-6">
+          <div className="query-state mt-10 border border-red-900/50 bg-red-950/15 px-6 py-6">
             <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-red-400">Request rejected / failed</p>
             <p className="mt-2 text-sm leading-6 text-ink-300">{error}</p>
             <button type="button" onClick={() => submit(question)} className="btn-ghost mt-4" disabled={!question.trim()}>
@@ -435,7 +435,7 @@ export function QueryInterface() {
         )}
 
         {status === "needs_confirmation" && pending && (
-          <div ref={resultRef} className="mt-10 space-y-5 scroll-mt-28">
+          <div ref={resultRef} className="query-result mt-10 space-y-5 scroll-mt-28">
             <div className="border border-amber-800/60 bg-amber-950/10 px-6 py-6">
               <div className="flex items-start gap-4">
                 <span className="mt-1 grid h-7 w-7 shrink-0 place-items-center border border-amber-700/60 text-amber-400">!</span>
@@ -456,7 +456,7 @@ export function QueryInterface() {
         )}
 
         {status === "success" && response && (
-          <div ref={resultRef} className="mt-10 space-y-5 scroll-mt-28">
+          <div ref={resultRef} className="query-result mt-10 space-y-5 scroll-mt-28">
             <div className="border-l-2 border-accent-400 pl-4">
               <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-ink-600">Question</p>
               <p className="mt-1 text-base text-ink-100 sm:text-lg">{response.question}</p>
