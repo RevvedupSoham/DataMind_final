@@ -4,7 +4,7 @@ const HARD_BLOCK_PATTERNS = [
   /\\b(create|alter|drop)\\s+(role|user|policy|trigger|function|procedure|extension)\\b/i,
   /\\bdrop\\s+database\\b/i,
   /\\bcopy\\b.*\\bprogram\\b/i,
-  /\\bpg_sleep\\s*\\(/i,
+  /\bpg_sleep\s*\(/i,
   /\\b(pg_read_file|pg_ls_dir|pg_reload_conf|lo_import|lo_export|dblink_exec|pg_terminate_backend|pg_cancel_backend)\\b/i,
   /\\b(information_schema\\.role|pg_catalog\\.pg_authid)\\b/i,
   /\\b(admin_users|member_users|owner_users)\\b/i,
