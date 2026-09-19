@@ -69,7 +69,7 @@ async function getHmacKey(): Promise<CryptoKey> {
 export async function createSessionToken(
   username: string, 
   role: UserRole, 
-  employeeId: number
+  employeeId: number | null
 ): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   const payload: SessionPayload = {
@@ -118,8 +118,10 @@ export async function verifySessionToken(token: string | undefined | null): Prom
     if (typeof payload.exp !== "number" || payload.exp < Math.floor(Date.now() / 1000)) {
       return null; // expired
     }
-    if (payload.role !== "admin" && payload.role !== "member") return null;
-    if (typeof payload.employeeId !== "number" || payload.employeeId <= 0) return null;
+    if (payload.role !== "owner" && payload.role !== "admin" && payload.role !== "member") return null;
+    if (payload.role === "owner") {
+      if (payload.employeeId !== null) return null;
+    } else if (typeof payload.employeeId !== "number" || payload.employeeId <= 0) return null;
 
     return payload;
   } catch {
