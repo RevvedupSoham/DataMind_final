@@ -119,6 +119,151 @@ Hash format:
 salt:hash
 ```
 
+Example:
+
+```text
+f83a1c...:9ab21d...
+```
+
+---
+
+# Why OWNER Uses `scrypt`
+
+OWNER accounts represent platform governance administrators rather than standard application users.
+
+OWNER users can:
+
+- manage schemas
+- perform governed SQL execution
+- administer database operations
+- access audit infrastructure
+- execute privileged workflows
+
+Because of this elevated privilege level, OWNER authentication was intentionally separated from PostgreSQL-native hashing.
+
+`scrypt` was selected because it provides:
+
+- memory-hard password protection
+- stronger GPU/ASIC resistance
+- timing-safe verification
+- backend-controlled authentication logic
+- future MFA compatibility
+- future SSO/OAuth extensibility
+- independent governance auditing
+
+---
+
+# Important OWNER Compatibility Note
+
+OWNER passwords must NOT be generated using:
+
+```sql
+crypt()
+gen_salt()
+```
+
+Those functions are valid only for:
+
+- `member_users`
+- `admin_users`
+
+OWNER login expects:
+
+```text
+salt:hash
+```
+
+—not PostgreSQL bcrypt hashes like:
+
+```text
+$2a$06$...
+```
+
+---
+
+# Creating OWNER Accounts
+
+OWNER accounts must be created using application-generated `scrypt` hashes.
+
+## Step 1 — Generate OWNER Password Hash
+
+Create a temporary script:
+
+```ts
+import { hashPassword } from "@/lib/auth/password";
+
+async function main() {
+  const hash = await hashPassword("YOUR_OWNER_PASSWORD");
+  console.log(hash);
+}
+
+main();
+```
+
+Run:
+
+```bash
+npx tsx scripts/generate-owner-hash.ts
+```
+
+Output example:
+
+```text
+7c1f9ab3e2...:0d991aa71f...
+```
+
+---
+
+## Step 2 — Insert OWNER User
+
+Use the generated hash in Supabase:
+
+```sql
+insert into owner_users (
+  username,
+  password_hash,
+  display_name
+)
+values (
+  'OWNER',
+  'PASTE_GENERATED_SCRYPT_HASH_HERE',
+  'Primary Owner'
+);
+```
+
+---
+
+## Step 3 — Update Existing OWNER Password
+
+Generate a new `scrypt` hash first.
+
+Then:
+
+```sql
+update owner_users
+set password_hash = 'NEW_SCRYPT_HASH'
+where username = 'OWNER';
+```
+
+---
+
+## View OWNER Accounts
+
+```sql
+select id, username, display_name, created_at
+from owner_users
+order by created_at desc;
+```
+
+---
+
+## Remove OWNER Account
+
+```sql
+delete from owner_users
+where username = 'OWNER';
+```
+
 ---
 
 # Enable Supabase RLS
@@ -226,9 +371,11 @@ Never expose the service role key publicly.
 
 1. Always hash passwords properly.
 2. Never manually type hashes.
-3. Always use SQL Editor for account management.
-4. Keep RLS enabled on business tables.
-5. OWNER accounts are separate from employee hierarchy.
-6. Backend APIs should authorize requests.
-7. PostgreSQL should enforce final security.
-8. Browser users should never directly query protected tables.
+3. OWNER hashes must use `scrypt`.
+4. MEMBER/ADMIN hashes use PostgreSQL `crypt()`.
+5. Always use SQL Editor for account management.
+6. Keep RLS enabled on business tables.
+7. OWNER accounts are separate from employee hierarchy.
+8. Backend APIs should authorize requests.
+9. PostgreSQL should enforce final security.
+10. Browser users should never directly query protected tables.
