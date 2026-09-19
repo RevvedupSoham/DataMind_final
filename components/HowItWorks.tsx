@@ -1,67 +1,12 @@
+import { Reveal } from "@/components/Reveal";
+
 const STEPS = [
-  {
-    n: "01",
-    title: "Ask",
-    body: "Write the question exactly as you would say it. No SQL syntax or database knowledge is required.",
-    tag: "INPUT",
-  },
-  {
-    n: "02",
-    title: "Translate",
-    body: "Groq uses the verified schema and user role to turn the question into a PostgreSQL statement.",
-    tag: "LLM",
-  },
-  {
-    n: "03",
-    title: "Validate + authorize",
-    body: "DataMind independently checks the statement, then enforces the logged-in employee's permitted scope.",
-    tag: "CONTROL",
-  },
-  {
-    n: "04",
-    title: "Execute + explain",
-    body: "Authorized SQL runs against Supabase PostgreSQL. You receive the real rows, SQL, and a suitable visualization when available.",
-    tag: "DATABASE",
-  },
+  ["01","Ask","Write the question exactly as you would say it. No SQL syntax or database knowledge is required.","INPUT"],
+  ["02","Translate","Groq uses the verified schema and user role to turn the question into a PostgreSQL statement.","LLM"],
+  ["03","Validate + authorize","DataMind independently checks the statement, then enforces the logged-in employee's permitted scope.","CONTROL"],
+  ["04","Execute + explain","Authorized SQL runs against Supabase PostgreSQL. You receive the real rows, SQL, and a suitable visualization when available.","DATABASE"],
 ];
 
 export function HowItWorks() {
-  return (
-    <section id="how-it-works" className="border-t border-ink-800 bg-ink-900 py-24 sm:py-28">
-      <div className="section">
-        <div className="grid gap-10 lg:grid-cols-[0.72fr_1.28fr]">
-          <div>
-            <p className="eyebrow">How it works</p>
-            <h2 className="mt-4 max-w-md font-display text-3xl leading-tight text-ink-100 sm:text-4xl">
-              The model translates.
-              <br />
-              <span className="italic text-accent-400">The database answers.</span>
-            </h2>
-            <p className="mt-6 max-w-sm text-sm leading-6 text-ink-500">
-              Every answer follows the same governed path. The LLM never becomes the
-              source of truth, and the frontend never decides what a user is allowed to see.
-            </p>
-          </div>
-
-          <div className="border-l border-ink-800">
-            {STEPS.map((step) => (
-              <div
-                key={step.n}
-                className="group grid grid-cols-[48px_1fr_auto] gap-4 border-b border-ink-800 px-5 py-6 first:border-t sm:grid-cols-[60px_1fr_auto] sm:px-7"
-              >
-                <span className="font-display text-xl italic text-accent-400">{step.n}</span>
-                <div>
-                  <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-ink-100">{step.title}</h3>
-                  <p className="mt-2 max-w-xl text-sm leading-6 text-ink-500">{step.body}</p>
-                </div>
-                <span className="self-start border border-ink-700 px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-600 group-hover:border-accent-500/40 group-hover:text-accent-400">
-                  {step.tag}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </section>
-  );
+  return <section id="how-it-works" className="border-t border-ink-800 bg-ink-900 py-28 sm:py-36"><div className="section"><div className="grid gap-12 lg:grid-cols-[0.72fr_1.28fr]"><Reveal><div className="lg:sticky lg:top-28 lg:self-start"><p className="eyebrow">How it works</p><h2 className="mt-4 max-w-md font-display text-4xl leading-[0.98] tracking-[-0.025em] text-ink-100 sm:text-5xl">The model translates.<br/><span className="italic text-accent-400">The database answers.</span></h2><p className="mt-7 max-w-sm text-sm leading-7 text-ink-500">Every answer follows the same governed path. The LLM never becomes the source of truth, and the frontend never decides what a user is allowed to see.</p><div className="mt-10 h-px w-24 bg-accent-400"/></div></Reveal><div className="border-l border-ink-800">{STEPS.map(([n,title,body,tag],index)=><Reveal key={n} delay={index*80}><div className="group relative grid grid-cols-[48px_1fr_auto] gap-4 border-b border-ink-800 px-5 py-8 first:border-t sm:grid-cols-[60px_1fr_auto] sm:px-8 sm:py-10"><span className="font-display text-2xl italic text-accent-400 transition-transform duration-500 group-hover:translate-x-1">{n}</span><div><h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-ink-100 transition-colors group-hover:text-accent-300">{title}</h3><p className="mt-3 max-w-xl text-sm leading-7 text-ink-500">{body}</p></div><span className="self-start border border-ink-700 px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-600 transition-colors group-hover:border-accent-500/40 group-hover:text-accent-400">{tag}</span><span className="pointer-events-none absolute bottom-0 left-0 h-px w-0 bg-accent-400 transition-all duration-700 group-hover:w-full"/></div></Reveal>)}</div></div></div></section>;
 }
