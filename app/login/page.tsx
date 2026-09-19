@@ -15,13 +15,17 @@ function LoginForm() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [ready, setReady] = useState(false);
+  const [headlineVisible, setHeadlineVisible] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem("datamind-theme");
     const light = saved === "light";
     document.documentElement.classList.toggle("theme-light", light);
     document.documentElement.style.colorScheme = light ? "light" : "dark";
-    const timer = window.setTimeout(() => setReady(true), 40);
+    const timer = window.setTimeout(() => {
+      setReady(true);
+      setHeadlineVisible(true);
+    }, 80);
     return () => window.clearTimeout(timer);
   }, []);
 
@@ -79,8 +83,8 @@ function LoginForm() {
 
           <div className="login-intro-copy">
             <p className="eyebrow">Database intelligence / 01</p>
-            <h1>
-              Ask the data.
+            <h1 className={headlineVisible ? "headline-typed" : ""}>
+              <span>Ask the data.</span>
               <br />
               <em>Not the model.</em>
             </h1>
@@ -110,18 +114,33 @@ function LoginForm() {
             Choose the access layer for this session.
           </p>
 
-          <div className="login-tabs">
-            {(["member", "admin", "owner"] as UserRole[]).map((role) => (
-              <button
-                key={role}
-                type="button"
-                onClick={() => selectPanel(role)}
-                className={panel === role ? "active" : ""}
-              >
-                <span>0{role === "member" ? 1 : role === "admin" ? 2 : 3}</span>
-                {role}
-              </button>
-            ))}
+          <div className="login-tabs login-tabs-hierarchy">
+            <button
+              type="button"
+              onClick={() => selectPanel("owner")}
+              className={"login-role-owner " + (panel === "owner" ? "active" : "")}
+            >
+              <span>01 / PLATFORM</span>
+              <strong>OWNER</strong>
+              <small>Full control plane</small>
+            </button>
+
+            <div className="login-role-lower">
+              {(["member", "admin"] as UserRole[]).map((role, index) => (
+                <button
+                  key={role}
+                  type="button"
+                  onClick={() => selectPanel(role)}
+                  className={panel === role ? "active" : ""}
+                >
+                  <span>0{index + 2}</span>
+                  <strong>{role}</strong>
+                  <small>
+                    {role === "admin" ? "Organizational access" : "Self-service access"}
+                  </small>
+                </button>
+              ))}
+            </div>
           </div>
 
           <form onSubmit={handleSubmit} className="login-form">
