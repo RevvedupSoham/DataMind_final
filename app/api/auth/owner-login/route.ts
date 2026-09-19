@@ -5,6 +5,9 @@ import {
   SESSION_COOKIE_NAME,
 } from "@/lib/auth/session";
 
+import { createAuditLog } from "@/lib/audit/logger";
+import { verifyOwnerCredentials } from "@/lib/database/owner-auth";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -41,24 +44,22 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const ownerUsername = process.env.OWNER_USERNAME;
-  const ownerPassword = process.env.OWNER_PASSWORD;
+  const owner = await verifyOwnerCredentials(
+    username.trim(),
+    password
+  );
 
-  if (!ownerUsername || !ownerPassword) {
-    return NextResponse.json(
-      {
-        error: "Owner authentication is not configured.",
+  if (!owner) {
+    await createAuditLog({
+      actorUsername: username.trim(),
+      actorRole: "owner",
+      operationType: "owner_login",
+      executionStatus: "failed",
+      metadata: {
+        reason: "invalid_credentials",
       },
-      {
-        status: 500,
-      }
-    );
-  }
+    });
 
-  if (
-    username.trim() !== ownerUsername ||
-    password !== ownerPassword
-  ) {
     return NextResponse.json(
       {
         error: "Invalid owner credentials.",
@@ -70,13 +71,21 @@ export async function POST(req: NextRequest) {
   }
 
   const token = await createSessionToken(
-    username.trim(),
+    owner.username,
     "owner",
     null
   );
 
+  await createAuditLog({
+    actorUsername: owner.username,
+    actorRole: "owner",
+    operationType: "owner_login",
+    executionStatus: "success",
+  });
+
   const response = NextResponse.json({
-    username: username.trim(),
+    username: owner.username,
+    displayName: owner.display_name,
     role: "owner",
   });
 
@@ -85,6 +94,7 @@ export async function POST(req: NextRequest) {
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: "/",
+    maxAge: 60 * 30,
   });
 
   return response;
