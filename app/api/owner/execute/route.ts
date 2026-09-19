@@ -9,34 +9,57 @@ import { createAuditLog } from "@/lib/audit/logger";
 export async function POST(req: NextRequest) {
   const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
 
-  const session = await verifySessionToken(token);
+const session = await verifySessionToken(token);
 
-  try {
+try {
     requireOwner(session);
   } catch {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 403 });
+    return NextResponse.json(
+      { error: "Unauthorized." },
+      { status: 403 }
+    );
   }
 
-  let body: unknown;
+let body: unknown;
 
-  try {
+try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
-  }
-
-  const sql = (body as { sql?: string })?.sql;
-
-  if (!sql || typeof sql !== "string") {
-    return NextResponse.json({ error: "SQL is required." }, { status: 400 });
-  }
-
-  const validation = validateSqlSafety(sql);
-
-  if (!validation.valid) {
     return NextResponse.json(
+      { error: "Invalid JSON body." },
+      { status: 400 }
+    );
+  }
+
+const sql = (body as { sql?: string })?.sql;
+
+if (!sql || typeof sql !== "string") {
+    return NextResponse.json(
+      { error: "SQL is required." },
+      { status: 400 }
+    );
+  }
+
+const validation = validateSqlSafety(sql);
+
+if (!validation.valid) {
+    await createAuditLog({
+      actorUsername: session!.username,
+      actorRole: session!.role,
+      operationType: "governed_execution",
+      executionStatus: "blocked",
+      metadata: {
+        sql,
+        blockedReason: validation.blockedReason,
+        riskLevel: validation.riskLevel,
+      },
+    });
+
+return NextResponse.json(
       {
-        error: validation.blockedReason || "SQL blocked by governance.",
+        error:
+          validation.blockedReason ||
+          "SQL blocked by governance.",
       },
       {
         status: 403,
@@ -44,35 +67,64 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  try {
-    const result = await executePrivilegedQuery(sql, "admin", 0);
+const startedAt = Date.now();
 
-    await createAuditLog({
+try {
+    const result = await executePrivilegedQuery(
+      sql,
+      "admin",
+      0
+    );
+
+const executionTimeMs = Date.now() - startedAt;
+
+await createAuditLog({
       actorUsername: session!.username,
       actorRole: session!.role,
-      operationType: "owner_sql_execution",
-      executionStatus: "executed",
+      operationType: "governed_execution",
+      executionStatus: "completed",
+      affectedRows: result.rowCount,
       metadata: {
         sql,
         riskLevel: validation.riskLevel,
+        executionTimeMs,
+        requiresConfirmation:
+          validation.requiresConfirmation,
       },
     });
 
-    return NextResponse.json({
+return NextResponse.json({
       success: true,
-      result,
-      governance: {
+      execution: {
+        rows: result.rows,
+        rowCount: result.rowCount,
+        columns: result.columns,
+        executionTimeMs,
         riskLevel: validation.riskLevel,
-        requiresConfirmation: validation.requiresConfirmation,
+        requiresConfirmation:
+          validation.requiresConfirmation,
       },
     });
   } catch (error) {
-    return NextResponse.json(
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Execution failed.";
+
+await createAuditLog({
+      actorUsername: session!.username,
+      actorRole: session!.role,
+      operationType: "governed_execution",
+      executionStatus: "failed",
+      metadata: {
+        sql,
+        error: message,
+      },
+    });
+
+return NextResponse.json(
       {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Execution failed.",
+        error: message,
       },
       {
         status: 500,
