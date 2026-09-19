@@ -1,3 +1,4 @@
+import { generateSqlFromPrompt } from "@/lib/owner/sql-generator";
 import { validateSqlSafety } from "@/lib/owner/sql-safety";
 
 export interface OperationPlan {
@@ -9,60 +10,57 @@ export interface OperationPlan {
   explanation: string;
 }
 
-function inferOperationType(prompt: string): string {
-  const lower = prompt.toLowerCase();
+function inferOperationType(sql: string): string {
+  const lower = sql.toLowerCase();
 
-  if (lower.includes("create table")) {
-    return "schema_create";
+  if (lower.startsWith("select")) {
+    return "query";
   }
 
-  if (lower.includes("delete")) {
-    return "delete";
+  if (lower.startsWith("insert")) {
+    return "insert";
   }
 
-  if (lower.includes("update")) {
+  if (lower.startsWith("update")) {
     return "update";
   }
 
-  return "query";
-}
-
-function generateSql(prompt: string): string {
-  const lower = prompt.toLowerCase();
-
-  if (lower.includes("show all employees")) {
-    return "SELECT * FROM employee LIMIT 100;";
+  if (lower.startsWith("delete")) {
+    return "delete";
   }
 
-  if (lower.includes("create projects table")) {
-    return `
-      CREATE TABLE projects (
-        project_id SERIAL PRIMARY KEY,
-        project_name TEXT NOT NULL,
-        status TEXT NOT NULL,
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-    `;
+  if (lower.startsWith("create")) {
+    return "schema_create";
   }
 
-  return "SELECT NOW();";
+  if (lower.startsWith("alter")) {
+    return "schema_alter";
+  }
+
+  if (lower.startsWith("drop")) {
+    return "schema_drop";
+  }
+
+  return "custom";
 }
 
-export function buildOperationPlan(
+export async function buildOperationPlan(
   naturalLanguagePrompt: string
-): OperationPlan {
-  const generatedSql = generateSql(naturalLanguagePrompt);
+): Promise<OperationPlan> {
+  const generatedSql = await generateSqlFromPrompt(
+    naturalLanguagePrompt
+  );
 
   const validation = validateSqlSafety(generatedSql);
 
   return {
-    operationType: inferOperationType(naturalLanguagePrompt),
+    operationType: inferOperationType(generatedSql),
     generatedSql,
     riskLevel: validation.riskLevel,
     requiresConfirmation: validation.requiresConfirmation,
     allowed: validation.valid,
     explanation: validation.valid
-      ? "Operation passed SQL safety validation."
+      ? "Governed execution plan generated successfully."
       : validation.blockedReason || "Operation blocked.",
   };
 }

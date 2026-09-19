@@ -1,8 +1,5 @@
-const BLOCKED_PATTERNS = [
-  /drop\s+database/i,
-  /truncate\s+/i,
+const HARD_BLOCK_PATTERNS = [
   /grant\s+superuser/i,
-  /revoke\s+all/i,
   /alter\s+system/i,
   /copy\s+.*program/i,
   /pg_sleep/i,
@@ -21,11 +18,12 @@ export function validateSqlSafety(
 ): SqlValidationResult {
   const normalized = sql.trim();
 
-  for (const pattern of BLOCKED_PATTERNS) {
+  for (const pattern of HARD_BLOCK_PATTERNS) {
     if (pattern.test(normalized)) {
       return {
         valid: false,
-        blockedReason: "Blocked privileged or dangerous SQL pattern.",
+        blockedReason:
+          "Blocked by DataMind governance protections.",
         riskLevel: "critical",
         requiresConfirmation: true,
       };
@@ -33,6 +31,17 @@ export function validateSqlSafety(
   }
 
   const lower = normalized.toLowerCase();
+
+  if (
+    lower.startsWith("drop") ||
+    lower.startsWith("truncate")
+  ) {
+    return {
+      valid: true,
+      riskLevel: "critical",
+      requiresConfirmation: true,
+    };
+  }
 
   if (
     lower.startsWith("delete") ||
