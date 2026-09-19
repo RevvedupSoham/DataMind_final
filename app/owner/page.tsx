@@ -156,7 +156,7 @@ export default function OwnerControlRoomPage() {
               {loading ? "Generating..." : "Begin Governed Execution"}
             </button>
 
-            {plan?.generatedSql && (
+            {plan?.generatedSql && plan.allowed && (
               <div className="flex flex-col gap-3">
                 {plan.requiresConfirmation && (
                   <label className="flex max-w-xl items-start gap-3 text-sm text-cyan-100">
