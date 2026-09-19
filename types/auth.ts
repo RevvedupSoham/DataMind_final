@@ -1,10 +1,14 @@
-export type UserRole = "admin" | "member";
+export type UserRole = "owner" | "admin" | "member";
 
 export interface SessionPayload {
   username: string;
   role: UserRole;
-  /** Employee ID this user is mapped to (for authorization) */
-  employeeId: number;
+  /**
+   * Employee ID this user is mapped to.
+   * OWNER users are intentionally outside employee hierarchy scope,
+   * so this field is nullable for owner sessions.
+   */
+  employeeId: number | null;
   /** Unix seconds. */
   iat: number;
   /** Unix seconds. */
@@ -15,12 +19,8 @@ export interface LoginRequestBody {
   username: string;
   password: string;
   /**
-   * Which login panel the user selected — "admin" or "member". This
-   * directly determines which table/RPC is checked (verify_admin_login
-   * against admin_users, or verify_member_login against member_users —
-   * see auth_setup.sql and lib/database/supabase.ts). It is not a
-   * UX-only hint: the two panels are structurally separate, so there is
-   * no cross-table fallback or comparison happening anywhere.
+   * Explicit authentication panel.
+   * OWNER authentication is isolated from employee-scoped auth tables.
    */
   panel: UserRole;
 }
@@ -28,5 +28,13 @@ export interface LoginRequestBody {
 export interface SessionUser {
   username: string;
   role: UserRole;
-  employeeId: number;
+  employeeId: number | null;
+}
+
+export interface OwnerUserRecord {
+  id: string;
+  username: string;
+  password_hash: string;
+  display_name: string;
+  created_at: string;
 }
