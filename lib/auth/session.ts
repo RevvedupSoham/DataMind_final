@@ -13,7 +13,8 @@ import type { SessionPayload, UserRole } from "@/types/auth";
  */
 
 export const SESSION_COOKIE_NAME = "datamind_session";
-const SESSION_TTL_SECONDS = 60 * 60 * 8; // 8 hours
+export const SESSION_IDLE_TIMEOUT_SECONDS = 60 * 30; // 30 minutes of inactivity
+const SESSION_TTL_SECONDS = SESSION_IDLE_TIMEOUT_SECONDS;
 
 function getSecret(): string {
   const secret = process.env.SESSION_SECRET;
@@ -126,4 +127,4 @@ export async function verifySessionToken(token: string | undefined | null): Prom
   }
 }
 
-export const SESSION_COOKIE_MAX_AGE_SECONDS = SESSION_TTL_SECONDS;
+// Intentionally no persistent maxAge is exported. The login cookie is a browser\n// session cookie, so closing the browser removes it. The signed token itself\n// expires after the inactivity window unless refreshed by the heartbeat route.
