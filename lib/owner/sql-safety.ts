@@ -143,6 +143,16 @@ export function validateSqlSafety(sql: string): SqlValidationResult {
 
   const statement = analysisSql.replace(/;\\s*$/, "").trim();
 
+  if (/^with\\b/i.test(statement) && /\\b(insert|update|delete|create|alter|drop|truncate)\\b/i.test(statement)) {
+    return {
+      valid: false,
+      blockedReason:
+        "WITH statements containing write or schema operations are blocked. Submit a single explicit operation.",
+      riskLevel: "critical",
+      requiresConfirmation: true,
+    };
+  }
+
   if (!/^(select|with|insert|update|delete|create|alter|drop|truncate)\\b/i.test(statement)) {
     return {
       valid: false,
