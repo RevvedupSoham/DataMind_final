@@ -49,6 +49,14 @@ Verification:
 - verify_member_login()
 - verify_admin_login()
 
+MEMBER and ADMIN authentication remains database-native because:
+
+- verification occurs inside PostgreSQL RPC functions
+- hierarchy authorization logic is SQL-centric
+- authentication stays close to the data layer
+- backend coordination is minimal
+- SQL-native verification simplifies operational flow
+
 ---
 
 ## OWNER
@@ -59,11 +67,98 @@ OWNER passwords use:
 Node.js scrypt hashing
 ```
 
+through:
+
+```text
+lib/auth/password.ts
+```
+
 Format:
 
 ```text
 salt:hash
 ```
+
+Example:
+
+```text
+f83a1c...:9ab21d...
+```
+
+OWNER authentication is intentionally separated from PostgreSQL-native hashing.
+
+---
+
+# Why OWNER Uses `scrypt`
+
+OWNER accounts represent platform governance administrators rather than standard application users.
+
+OWNER users can:
+
+- manage schemas
+- perform governed SQL execution
+- administer database operations
+- access audit infrastructure
+- execute privileged workflows
+
+Because of this elevated privilege level, OWNER authentication was designed as a backend-controlled security layer.
+
+`scrypt` was selected because it provides:
+
+- memory-hard password protection
+- stronger GPU/ASIC resistance
+- timing-safe verification
+- backend-controlled authentication logic
+- future MFA compatibility
+- future SSO/OAuth extensibility
+- independent governance auditing
+
+This architecture is more suitable for privileged administrative access.
+
+---
+
+# Important Compatibility Note
+
+OWNER passwords must NOT be generated using:
+
+```sql
+crypt()
+gen_salt()
+```
+
+Those functions are valid only for:
+
+- `member_users`
+- `admin_users`
+
+OWNER password hashes must be generated through the application hashing utilities.
+
+Otherwise authentication fails because OWNER login expects:
+
+```text
+salt:hash
+```
+
+—not PostgreSQL bcrypt hash formats like:
+
+```text
+$2a$06$...
+```
+
+---
+
+# Authentication Architecture Summary
+
+| Role Type | Authentication Model |
+|---|---|
+| MEMBER | PostgreSQL `crypt()` |
+| ADMIN | PostgreSQL `crypt()` |
+| OWNER | Backend `scrypt` hashing |
+
+This separation is intentional:
+
+- MEMBER/ADMIN = application users
+- OWNER = platform governance administrator
 
 ---
 
