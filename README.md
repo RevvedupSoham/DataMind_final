@@ -9,7 +9,7 @@ makes sense — a chart. There is no mock data anywhere in the pipeline: the
 database is the single source of truth, and the LLM's only job is translating
 English into SQL.
 
-DataMind sits behind a login with **employee-mapped authorization**. Each user
+DataMind sits behind role-specific authentication. ADMIN and MEMBER accounts use **employee-mapped authorization**, while OWNER accounts use a separate platform-level control plane. Each user
 account is linked to an employee record, and all queries are enforced with
 role-based AND employee-level access policies:
 
@@ -21,6 +21,53 @@ role-based AND employee-level access policies:
   for themselves, their direct reports, and all indirect reports (unlimited
   depth with cycle protection). Admin writes require explicit confirmation.
 
+## OWNER Control Room
+
+DataMind also has a separate **OWNER control plane** for platform-level database
+operations. OWNER authentication is independent of employee hierarchy
+authentication and carries no employee ID.
+
+OWNER requests follow this lifecycle:
+
+```
+OWNER login
+   ↓
+Natural-language operational request
+   ↓
+Groq · openai/gpt-oss-120b
+   ↓
+Generated PostgreSQL operation
+   ↓
+Independent OWNER SQL governance
+   ↓
+Risk classification
+   ↓
+Signed, short-lived approval token
+   ↓
+Explicit confirmation for writes/destructive operations
+   ↓
+Dedicated execute_owner_sql RPC
+   ↓
+PostgreSQL
+   ↓
+Audit log
+```
+
+OWNER does **not** execute through the ADMIN employee-scoped RPC. This keeps
+platform-level database control separate from employee hierarchy authorization.
+
+The OWNER SQL governance layer permits only one operation at a time and blocks
+privilege-management statements, authentication-table access, arbitrary
+server/file functions, multi-statement execution, and unqualified UPDATE/DELETE
+operations. The database RPC repeats the critical safety checks as a
+defense-in-depth boundary.
+
+The OWNER approval token is bound to the authenticated OWNER username and the
+exact generated SQL, and expires after a short period. This prevents changing
+the reviewed SQL between planning and execution.
+
+---
+
 ## Problem & solution
 
 Non-technical stakeholders can't write SQL, and engineers don't want to be a
@@ -28,7 +75,7 @@ human query API. Traditional database interfaces lack granular access control.
 DataMind closes that gap with **natural language + authorization**:
 
 ```
-Login (member or admin) → mapped to employee_id
+Login (member or admin) → mapped to employee_id\nOWNER login → platform-level control plane
    ↓
 Natural language question
    ↓

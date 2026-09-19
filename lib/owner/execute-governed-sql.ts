@@ -1,7 +1,6 @@
 import "server-only";
 
 import { createClient } from "@supabase/supabase-js";
-
 import { validateSqlSafety } from "@/lib/owner/sql-safety";
 
 export interface GovernedExecutionResult {
@@ -41,10 +40,8 @@ export async function executeGovernedSql(
 
   const startedAt = Date.now();
 
-  const { data, error } = await client.rpc("execute_privileged_sql", {
+  const { data, error } = await client.rpc("execute_owner_sql", {
     p_sql: sql,
-    p_role: "admin",
-    p_employee_id: 1,
   });
 
   if (error) {
@@ -52,12 +49,23 @@ export async function executeGovernedSql(
   }
 
   const rows = Array.isArray(data) ? data : [];
+  let affectedRows = rows.length;
+
+  if (
+    rows.length === 1 &&
+    rows[0] &&
+    typeof rows[0] === "object" &&
+    "affected_rows" in rows[0] &&
+    typeof (rows[0] as { affected_rows?: unknown }).affected_rows === "number"
+  ) {
+    affectedRows = (rows[0] as { affected_rows: number }).affected_rows;
+  }
 
   return {
     success: true,
     rows,
-    rowCount: rows.length,
+    rowCount: affectedRows,
     executionTimeMs: Date.now() - startedAt,
-    message: "Governed SQL execution completed successfully.",
+    message: "Governed OWNER SQL execution completed successfully.",
   };
 }
