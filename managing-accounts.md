@@ -110,6 +110,7 @@ They:
 - manage governed database workflows
 - use natural-language planning
 - access controlled SQL governance tools
+- administer privileged database workflows
 
 OWNER passwords use application-side `scrypt` hashing.
 
@@ -118,6 +119,159 @@ Hash format:
 ```text
 salt:hash
 ```
+
+Example:
+
+```text
+f83a1c...:9ab21d...
+```
+
+---
+
+# Why OWNER Uses `scrypt`
+
+OWNER accounts represent platform governance administrators rather than standard application users.
+
+OWNER users can:
+
+- perform governed SQL execution
+- manage schemas
+- administer database operations
+- access audit infrastructure
+- execute privileged workflows
+
+Because of this elevated privilege level, OWNER authentication was intentionally separated from PostgreSQL-native hashing.
+
+`scrypt` was selected because it provides:
+
+- memory-hard password protection
+- stronger GPU/ASIC resistance
+- timing-safe verification
+- backend-controlled authentication
+- future MFA compatibility
+- future SSO/OAuth extensibility
+- independent governance auditing
+
+---
+
+# Important OWNER Compatibility Note
+
+OWNER passwords must NOT be generated using:
+
+```sql
+crypt()
+gen_salt()
+```
+
+Those are valid only for:
+
+- `member_users`
+- `admin_users`
+
+If a PostgreSQL bcrypt hash is inserted into `owner_users.password_hash`, OWNER login will fail.
+
+Incorrect format:
+
+```text
+$2a$06$...
+```
+
+Correct format:
+
+```text
+salt:hash
+```
+
+---
+
+# How to Create an OWNER Account
+
+OWNER hashes must be generated through the application hashing utility.
+
+## Step 1 — Create Hash Generator Script
+
+Create:
+
+```text
+scripts/generate-owner-hash.ts
+```
+
+Contents:
+
+```ts
+import { hashPassword } from "@/lib/auth/password";
+
+async function main() {
+  const hash = await hashPassword("YOUR_OWNER_PASSWORD");
+  console.log(hash);
+}
+
+main();
+```
+
+---
+
+## Step 2 — Generate Hash
+
+Run:
+
+```bash
+npx tsx scripts/generate-owner-hash.ts
+```
+
+Example output:
+
+```text
+f83a1cf0f9a1f2...:9ab21dff01ab...
+```
+
+---
+
+## Step 3 — Insert OWNER Account
+
+Use the generated hash in Supabase:
+
+```sql
+insert into owner_users (
+  username,
+  password_hash,
+  display_name
+)
+values (
+  'OWNER',
+  'PASTE_GENERATED_HASH_HERE',
+  'Primary Owner'
+);
+```
+
+---
+
+# How to Change an OWNER Password
+
+Generate a new `scrypt` hash using the script above.
+
+Then update:
+
+```sql
+update owner_users
+set password_hash = 'NEW_SCRYPT_HASH'
+where username = 'OWNER';
+```
+
+---
+
+# Authentication Architecture Summary
+
+| Role Type | Authentication Model |
+|---|---|
+| MEMBER | PostgreSQL `crypt()` |
+| ADMIN | PostgreSQL `crypt()` |
+| OWNER | Backend `scrypt` hashing |
+
+This separation is intentional:
+
+- MEMBER/ADMIN = application users
+- OWNER = platform governance administrator
 
 ---
 
@@ -226,9 +380,10 @@ Never expose the service role key publicly.
 
 1. Always hash passwords properly.
 2. Never manually type hashes.
-3. Always use SQL Editor for account management.
-4. Keep RLS enabled on business tables.
-5. OWNER accounts are separate from employee hierarchy.
-6. Backend APIs should authorize requests.
-7. PostgreSQL should enforce final security.
-8. Browser users should never directly query protected tables.
+3. OWNER accounts require `scrypt` hashes.
+4. MEMBER/ADMIN accounts use PostgreSQL `crypt()`.
+5. Always use SQL Editor for account management.
+6. Keep RLS enabled on business tables.
+7. Backend APIs should authorize requests.
+8. PostgreSQL should enforce final security.
+9. Browser users should never directly query protected tables.
