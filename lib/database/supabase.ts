@@ -10,6 +10,16 @@ export class DatabaseError extends Error {
   }
 }
 
+export async function verifyOwnerCredentials(username: string, password: string): Promise<boolean> {
+  const client = getServiceClient();
+  const { data, error } = await client.rpc("verify_owner_login", {
+    p_username: username,
+    p_password: password,
+  });
+  if (error) throw new DatabaseError("Owner authentication is not configured. Run owner_setup.sql in Supabase.");
+  return data === true;
+}
+
 export class AuthorizationError extends Error {
   constructor(message: string) {
     super(message);
