@@ -161,7 +161,7 @@ function LoginForm() {
 
               <div className="mt-7 border-t border-ink-800 pt-5">
                 <p className="text-xs leading-5 text-ink-600">
-                  {panel === "admin"
+                  {panel === "owner" ? "Owner access provides database administration capabilities subject to the configured database permissions." : panel === "admin"
                     ? "Admin access includes controlled changes in addition to permitted database queries."
                     : "Member access is read-only, with personal data and approved aggregate queries within scope."}
                 </p>
