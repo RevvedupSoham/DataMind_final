@@ -41,6 +41,14 @@ function inferOperationType(sql: string): string {
     return "schema_drop";
   }
 
+  if (lower.startsWith("truncate")) {
+    return "schema_truncate";
+  }
+
+  if (lower.startsWith("with")) {
+    return "cte_query";
+  }
+
   return "custom";
 }
 
