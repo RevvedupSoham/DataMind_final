@@ -82,11 +82,9 @@ begin
     raise exception 'SQL exceeds the OWNER execution limit';
   end if;
 
-  -- Remove comments for governance checks.
   v_without_comments := regexp_replace(v_sql, '--[^\n]*', '', 'g');
   v_without_comments := regexp_replace(v_without_comments, '/\*([\s\S]*?)\*/', '', 'g');
 
-  -- One SQL operation only. A single trailing semicolon is permitted.
   v_statement_count := length(v_without_comments) - length(replace(v_without_comments, ';', ''));
   if right(trim(v_without_comments), 1) = ';' then
     v_statement_count := v_statement_count - 1;
@@ -95,8 +93,8 @@ begin
     raise exception 'Multiple SQL statements are not allowed';
   end if;
 
-  if v_without_comments ~* '^\s*with\s' 
-     and v_without_comments ~* '\\y(insert|update|delete|create|alter|drop|truncate)\\y' then
+  if v_without_comments ~* '^\s*with\s'
+     and v_without_comments ~* '\y(insert|update|delete|create|alter|drop|truncate)\y' then
     raise exception 'WITH statements containing write or schema operations are not allowed';
   end if;
 

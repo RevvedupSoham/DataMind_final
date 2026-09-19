@@ -22,14 +22,28 @@ export default function OwnerControlRoomPage() {
   const [error, setError] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState(false);
 
-  async function generatePlan() {
-    setLoading(true);
-    setError(null);
+  function resetRunState() {
+    setPlan(null);
     setResult(null);
+    setError(null);
     setConfirmed(false);
+    setTimeline([]);
+  }
+
+  async function generatePlan() {
+    const trimmedPrompt = prompt.trim();
+
+    if (!trimmedPrompt) {
+      resetRunState();
+      setExecutionStage("failed");
+      setError("Enter an OWNER operation before starting execution.");
+      return;
+    }
+
+    setLoading(true);
+    resetRunState();
 
     setExecutionStage("reasoning");
-
     setTimeline([
       "Understanding owner intent",
       "Generating governed SQL",
@@ -42,12 +56,15 @@ export default function OwnerControlRoomPage() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({ prompt: trimmedPrompt }),
       });
 
-      const data = await response.json();
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        plan?: OperationPlan;
+      };
 
-      if (!response.ok) {
+      if (!response.ok || !data.plan) {
         throw new Error(data.error || "Planning failed.");
       }
 
@@ -58,14 +75,22 @@ export default function OwnerControlRoomPage() {
         "Execution plan generated successfully",
       ]);
 
-      setExecutionStage("awaiting_confirmation");
+      setExecutionStage(
+        data.plan.requiresConfirmation
+          ? "awaiting_confirmation"
+          : "ready_to_execute"
+      );
     } catch (err) {
+      setPlan(null);
       setExecutionStage("failed");
 
+      setTimeline((current) => [
+        ...current,
+        "Execution plan generation failed",
+      ]);
+
       setError(
-        err instanceof Error
-          ? err.message
-          : "Planning failed."
+        err instanceof Error ? err.message : "Planning failed."
       );
     } finally {
       setLoading(false);
@@ -73,17 +98,24 @@ export default function OwnerControlRoomPage() {
   }
 
   async function executePlan() {
-    if (!plan?.generatedSql) {
-      setError("No generated SQL available.");
+    if (!plan?.generatedSql || !plan.allowed) {
+      setError("No executable OWNER operation is available.");
       return;
     }
 
+    if (plan.requiresConfirmation && !confirmed) {
+      setError("Confirm the operation before execution.");
+      setExecutionStage("awaiting_confirmation");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
     setExecutionStage("executing");
 
     setTimeline((current) => [
       ...current,
       "Executing SQL against PostgreSQL",
-      "Persisting audit logs",
     ]);
 
     try {
@@ -99,9 +131,18 @@ export default function OwnerControlRoomPage() {
         }),
       });
 
-      const data = await response.json();
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        requiresConfirmation?: boolean;
+        execution?: { rowCount?: number };
+      };
 
       if (!response.ok) {
+        if (response.status === 409 && data.requiresConfirmation) {
+          setExecutionStage("awaiting_confirmation");
+        } else {
+          setExecutionStage("failed");
+        }
         throw new Error(data.error || "Execution failed.");
       }
 
@@ -110,21 +151,28 @@ export default function OwnerControlRoomPage() {
       setTimeline((current) => [
         ...current,
         "Database execution completed successfully",
+        "Audit log persisted",
       ]);
 
       setResult(
         `Execution completed successfully. Rows affected: ${data.execution?.rowCount ?? 0}`
       );
     } catch (err) {
-      setExecutionStage("failed");
+      setExecutionStage((current) =>
+        current === "awaiting_confirmation" ? current : "failed"
+      );
 
       setError(
-        err instanceof Error
-          ? err.message
-          : "Execution failed."
+        err instanceof Error ? err.message : "Execution failed."
       );
+    } finally {
+      setLoading(false);
     }
   }
+
+  const executeLabel = plan?.requiresConfirmation
+    ? "Confirm & Execute Operation"
+    : "Execute Operation";
 
   return (
     <main className="min-h-screen bg-[#071018] px-6 py-10 text-white">
@@ -147,13 +195,13 @@ export default function OwnerControlRoomPage() {
             className="min-h-[220px] w-full resize-none bg-transparent text-white outline-none"
           />
 
-          <div className="mt-6 flex gap-4">
+          <div className="mt-6 flex flex-col gap-4 sm:flex-row sm:items-start">
             <button
               onClick={generatePlan}
               disabled={loading}
-              className="rounded-lg bg-cyan-500 px-5 py-3 font-medium text-black"
+              className="rounded-lg bg-cyan-500 px-5 py-3 font-medium text-black disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {loading ? "Generating..." : "Begin Governed Execution"}
+              {loading ? "Working..." : "Begin Governed Execution"}
             </button>
 
             {plan?.generatedSql && plan.allowed && (
@@ -164,6 +212,7 @@ export default function OwnerControlRoomPage() {
                       type="checkbox"
                       checked={confirmed}
                       onChange={(e) => setConfirmed(e.target.checked)}
+                      disabled={loading}
                       className="mt-1 h-4 w-4 accent-cyan-500"
                     />
                     <span>
@@ -172,12 +221,13 @@ export default function OwnerControlRoomPage() {
                     </span>
                   </label>
                 )}
+
                 <button
                   onClick={executePlan}
-                  disabled={plan.requiresConfirmation && !confirmed}
+                  disabled={loading || (plan.requiresConfirmation && !confirmed)}
                   className="rounded-lg border border-cyan-500 px-5 py-3 disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  {plan.requiresConfirmation ? "Confirm & Execute Operation" : "Execute Operation"}
+                  {loading ? "Executing..." : executeLabel}
                 </button>
               </div>
             )}
@@ -197,15 +247,21 @@ export default function OwnerControlRoomPage() {
             </h2>
 
             <div className="mt-6 space-y-3">
-              {timeline.map((entry) => (
-                <div
-                  key={entry}
-                  className="flex items-center gap-3 rounded-lg border border-cyan-950 bg-black/30 p-4"
-                >
-                  <div className="h-2.5 w-2.5 rounded-full bg-cyan-400" />
-                  <p>{entry}</p>
+              {timeline.length === 0 ? (
+                <div className="rounded-lg border border-cyan-950 bg-black/30 p-4 text-slate-400">
+                  Waiting for an OWNER operation.
                 </div>
-              ))}
+              ) : (
+                timeline.map((entry, index) => (
+                  <div
+                    key={`${entry}-${index}`}
+                    className="flex items-center gap-3 rounded-lg border border-cyan-950 bg-black/30 p-4"
+                  >
+                    <div className="h-2.5 w-2.5 rounded-full bg-cyan-400" />
+                    <p>{entry}</p>
+                  </div>
+                ))
+              )}
             </div>
 
             <div className="mt-6 rounded-lg border border-cyan-700 bg-cyan-500/10 p-4">
@@ -214,7 +270,7 @@ export default function OwnerControlRoomPage() {
               </p>
 
               <p className="mt-2 text-2xl font-semibold capitalize text-white">
-                {executionStage.replaceAll("_", " ")}
+                {executionStage.replaceAll("_", " ") || "idle"}
               </p>
             </div>
           </section>
@@ -224,7 +280,7 @@ export default function OwnerControlRoomPage() {
               Generated SQL
             </h2>
 
-            <pre className="mt-6 overflow-x-auto rounded-lg border border-cyan-950 bg-black p-5 text-cyan-300">
+            <pre className="mt-6 max-h-80 overflow-auto rounded-lg border border-cyan-950 bg-black p-5 text-cyan-300">
               <code>
                 {plan?.generatedSql || "-- Awaiting generated SQL"}
               </code>
