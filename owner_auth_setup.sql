@@ -83,9 +83,8 @@ begin
   end if;
 
   -- Remove comments for governance checks.
-  v_without_comments := regexp_replace(v_sql, '--[^
-]*', '', 'g');
-  v_without_comments := regexp_replace(v_without_comments, '/\\*([\\s\\S]*?)\\*/', '', 'g');
+  v_without_comments := regexp_replace(v_sql, '--[^\n]*', '', 'g');
+  v_without_comments := regexp_replace(v_without_comments, '/\*([\s\S]*?)\*/', '', 'g');
 
   -- One SQL operation only. A single trailing semicolon is permitted.
   v_statement_count := length(v_without_comments) - length(replace(v_without_comments, ';', ''));
@@ -96,29 +95,29 @@ begin
     raise exception 'Multiple SQL statements are not allowed';
   end if;
 
-  if v_without_comments !~* '^\\s*(select|with|insert|update|delete|create|alter|drop|truncate)(\\s|$)' then
+  if v_without_comments !~* '^\s*(select|with|insert|update|delete|create|alter|drop|truncate)(\s|$)' then
     raise exception 'Unrecognized or disallowed OWNER statement type';
   end if;
 
-  if v_without_comments ~* '\\y(grant|revoke|merge|call|execute|vacuum|copy|listen|notify|comment)\\y'
-     or v_without_comments ~* '\\yalter\\s+system\\y'
-     or v_without_comments ~* '\\y(create|alter|drop)\\s+(role|user|policy|trigger|function|procedure|extension)\\y'
-     or v_without_comments ~* '\\ydrop\\s+database\\y'
-     or v_without_comments ~* '\\y(copy)\\y.*\\yprogram\\y'
-     or v_without_comments ~* '\\y(pg_sleep|pg_read_file|pg_ls_dir|pg_reload_conf|lo_import|lo_export|dblink_exec|pg_terminate_backend|pg_cancel_backend)\\s*'
-     or v_without_comments ~* '\\y(admin_users|member_users|owner_users)\\y' then
+  if v_without_comments ~* '\y(grant|revoke|merge|call|execute|vacuum|copy|listen|notify|comment)\y'
+     or v_without_comments ~* '\yalter\s+system\y'
+     or v_without_comments ~* '\y(create|alter|drop)\s+(role|user|policy|trigger|function|procedure|extension)\y'
+     or v_without_comments ~* '\ydrop\s+database\y'
+     or v_without_comments ~* '\y(copy)\y.*\yprogram\y'
+     or v_without_comments ~* '\y(pg_sleep|pg_read_file|pg_ls_dir|pg_reload_conf|lo_import|lo_export|dblink_exec|pg_terminate_backend|pg_cancel_backend)\s*'
+     or v_without_comments ~* '\y(admin_users|member_users|owner_users)\y' then
     raise exception 'This OWNER operation is blocked by DataMind governance';
   end if;
 
-  if v_without_comments ~* '^\\s*(update|delete)\\y'
-     and v_without_comments !~* '\\ywhere\\y' then
+  if v_without_comments ~* '^\s*(update|delete)\y'
+     and v_without_comments !~* '\ywhere\y' then
     raise exception 'UPDATE/DELETE without a WHERE clause is not allowed';
   end if;
 
-  if v_without_comments ~* '^\\s*(select|with)\\y' then
+  if v_without_comments ~* '^\s*(select|with)\y' then
     return query execute format(
       'select to_json(t) from (%s) t',
-      regexp_replace(v_sql, ';\\s*$', '')
+      regexp_replace(v_sql, ';\s*$', '')
     );
   end if;
 
