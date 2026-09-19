@@ -60,6 +60,10 @@ export async function getDatabaseTables(): Promise<DatabaseTable[]> {
 export async function getTableColumns(
   tableName: string
 ): Promise<DatabaseColumn[]> {
+  if (!/^[A-Za-z_][A-Za-z0-9_$]*$/.test(tableName)) {
+    throw new Error("Invalid table name.");
+  }
+
   const client = getClient();
 
   const { data, error } = await client.rpc("execute_readonly_sql", {
@@ -70,7 +74,7 @@ export async function getTableColumns(
         data_type,
         is_nullable
       FROM information_schema.columns
-      WHERE table_name = '${tableName}'
+      WHERE table_schema = 'public'\n        AND table_name = '${tableName}'
       ORDER BY ordinal_position;
     `,
   });
