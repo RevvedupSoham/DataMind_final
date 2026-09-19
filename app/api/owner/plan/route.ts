@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const plan = buildOperationPlan(prompt);
+  const plan = await buildOperationPlan(prompt);
 
   await createAuditLog({
     actorUsername: session!.username,
@@ -60,12 +60,14 @@ export async function POST(req: NextRequest) {
     executionStatus: plan.allowed ? "planned" : "blocked",
     metadata: {
       prompt,
+      generatedSql: plan.generatedSql,
       riskLevel: plan.riskLevel,
       operationType: plan.operationType,
     },
   });
 
   return NextResponse.json({
+    success: true,
     plan,
   });
 }
