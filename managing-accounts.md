@@ -1,127 +1,490 @@
-# DataMind — Managing Admin & Member Accounts
+# DataMind — Managing Accounts, OWNER Access, and RLS
 
-A quick reference for adding, changing, or removing login accounts. All of
-this happens in the **Supabase SQL Editor** — never in the Table Editor's
-"Insert" button, and never in the app's UI (DataMind has no self-signup).
+A complete operational reference for managing:
 
-## Why the SQL Editor, and not the Insert button
+- MEMBER accounts
+- ADMIN accounts
+- OWNER accounts
+- password changes
+- login verification
+- Supabase RLS security
+- backend-only database access
 
-`admin_users` and `member_users` each store a `password_hash`, not a plain
-password. That hash is produced by Postgres's `pgcrypto` extension via
-`crypt(password, gen_salt('bf'))`. The Table Editor's Insert button just
-stores whatever text you type — it does **not** run that hashing function.
-A row added that way will never let anyone log in, because the login check
-(`verify_admin_login` / `verify_member_login`) compares the stored value
-against a *freshly computed* hash of the typed password, and a plain-text
-value will never match.
+All account management happens through the **Supabase SQL Editor**.
 
-So: always add or change accounts by running SQL, not by clicking Insert.
+Never use:
+- the Supabase Table Editor "Insert" button
+- frontend forms
+- manual hash editing
+
+DataMind has no self-signup system.
 
 ---
 
-## Add a new member account
+# Why the SQL Editor Must Be Used
+
+`admin_users`, `member_users`, and `owner_users` store:
+
+```text
+password_hash
+```
+
+—not plain-text passwords.
+
+Those hashes are generated securely:
+
+- MEMBER/ADMIN:
+  - PostgreSQL `crypt(password, gen_salt('bf'))`
+- OWNER:
+  - application-side secure `scrypt` hashing
+
+The Supabase Table Editor does not run hashing automatically.
+
+If you manually type a password into `password_hash`, login will fail.
+
+Always use SQL.
+
+---
+
+# MEMBER Accounts
+
+## Create MEMBER
 
 ```sql
 insert into member_users (username, password_hash)
-values ('newusername', crypt('their-password', gen_salt('bf')));
+values (
+  'newmember',
+  crypt('their-password', gen_salt('bf'))
+);
 ```
 
-## Add a new admin account
+---
+
+## Change MEMBER Password
+
+```sql
+update member_users
+set password_hash = crypt('their-new-password', gen_salt('bf'))
+where username = 'newmember';
+```
+
+---
+
+## Verify MEMBER Login
+
+```sql
+select verify_member_login(
+  'newmember',
+  'their-password'
+);
+```
+
+Returns:
+
+```text
+true
+```
+
+or:
+
+```text
+false
+```
+
+---
+
+# ADMIN Accounts
+
+## Create ADMIN
 
 ```sql
 insert into admin_users (username, password_hash)
-values ('newusername', crypt('their-password', gen_salt('bf')));
+values (
+  'newadmin',
+  crypt('their-password', gen_salt('bf'))
+);
 ```
-
-**Notes:**
-- `username` must be unique within its own table (an admin username and a
-  member username *can* coincide, since the two tables are completely
-  separate — but it's clearer to avoid that).
-- Choose a real password when you insert it — there's no separate "set
-  password later" step.
 
 ---
 
-## Change an existing account's password
+## Change ADMIN Password
 
 ```sql
--- Member:
-update member_users
-set password_hash = crypt('their-new-password', gen_salt('bf'))
-where username = 'theirusername';
-
--- Admin:
 update admin_users
 set password_hash = crypt('their-new-password', gen_salt('bf'))
-where username = 'theirusername';
+where username = 'newadmin';
 ```
-
-Always double-check the `where` clause matches exactly one row before
-running an `update` — an `update` with a `where` that matches nothing
-silently does nothing (Supabase will still say "Success"), and one that
-matches more rows than intended will overwrite more passwords than you meant to.
 
 ---
 
-## Check whether a login will work — before the user tries
+## Verify ADMIN Login
 
 ```sql
--- Member:
-select verify_member_login('theirusername', 'the-password-they-will-type');
-
--- Admin:
-select verify_admin_login('theirusername', 'the-password-they-will-type');
+select verify_admin_login(
+  'newadmin',
+  'their-password'
+);
 ```
-
-Returns `true` if that exact username/password pair would succeed, `false`
-otherwise. Handy for confirming a new account or a password change worked
-before handing credentials to someone.
 
 ---
 
-## View existing accounts (usernames only — hashes aren't reversible)
+# OWNER Accounts
+
+OWNER accounts are different from MEMBER and ADMIN accounts.
+
+OWNER users:
+
+- are not tied to employee hierarchy
+- are not employee-scoped
+- have database governance authority
+- access the Owner Control Room
+- use the governed SQL planning system
+
+---
+
+## OWNER Table Structure
 
 ```sql
-select id, username, created_at from admin_users order by created_at desc;
-select id, username, created_at from member_users order by created_at desc;
+owner_users
 ```
 
-There's no way to recover a forgotten password from its hash — hashing is
-one-way by design. If someone forgets their password, set a new one with
-the `update` command above; you cannot look up or restore the old one.
+Columns:
+
+| Column | Purpose |
+|---|---|
+| id | UUID / identifier |
+| username | OWNER login username |
+| password_hash | secure scrypt hash |
+| display_name | owner display label |
+| created_at | creation timestamp |
 
 ---
 
-## Remove an account
+## Important OWNER Password Note
+
+OWNER passwords are hashed by the application using:
+
+```text
+Node.js scrypt
+```
+
+—not PostgreSQL `crypt()`.
+
+That means OWNER hashes should normally be generated through:
+
+- backend utilities
+- scripts
+- seeded values
+
+—not manually typed.
+
+The format is:
+
+```text
+salt:hash
+```
+
+Example:
+
+```text
+4f3ab2...:8a92ff...
+```
+
+---
+
+# View Existing Accounts
+
+## MEMBER
 
 ```sql
--- Member:
-delete from member_users where username = 'theirusername';
-
--- Admin:
-delete from admin_users where username = 'theirusername';
+select id, username, created_at
+from member_users
+order by created_at desc;
 ```
 
-This only removes their ability to log in. It has no effect on the
-`employee`/`department`/etc. application data — those tables are entirely
-separate from both login tables.
+## ADMIN
+
+```sql
+select id, username, created_at
+from admin_users
+order by created_at desc;
+```
+
+## OWNER
+
+```sql
+select id, username, display_name, created_at
+from owner_users
+order by created_at desc;
+```
 
 ---
 
-## Rules of thumb
+# Remove Accounts
 
-1. **Always use `crypt(password, gen_salt('bf'))`** when writing a
-   `password_hash`. Never type or paste a hash value directly, and never
-   paste a hash into the login form's password field either.
-2. **Admin and member accounts live in separate tables** — `admin_users`
-   and `member_users`. There's no shared table and no "promote a member to
-   admin" update; to change someone's access level, delete them from one
-   table and insert them into the other.
-3. **The two demo accounts** (`admin` / `change-me-admin` and `member` /
-   `change-me-member`) from initial setup should have their passwords
-   changed with the `update` command above before sharing access with
-   anyone beyond yourself.
-4. **No code or restart needed** for any of this — these are pure data
-   changes in Supabase, picked up immediately the next time someone logs
-   in. You never need to touch `.env.local`, redeploy, or restart the app
-   to add, change, or remove an account.
+## MEMBER
+
+```sql
+delete from member_users
+where username = 'newmember';
+```
+
+## ADMIN
+
+```sql
+delete from admin_users
+where username = 'newadmin';
+```
+
+## OWNER
+
+```sql
+delete from owner_users
+where username = 'ownername';
+```
+
+This only removes login access.
+
+It does not affect:
+
+- employee data
+- salary data
+- department records
+- organizational data
+
+---
+
+# Supabase RLS Configuration
+
+DataMind uses:
+
+```text
+Frontend
+   ↓
+Next.js API
+   ↓
+Service Role Key
+   ↓
+PostgreSQL
+```
+
+The browser never directly accesses protected tables.
+
+Backend APIs authorize requests.
+
+PostgreSQL enforces security.
+
+Core philosophy:
+
+```text
+LLM interprets
+Backend authorizes
+PostgreSQL enforces
+```
+
+---
+
+# Enable RLS on All Business Tables
+
+Run in Supabase SQL Editor:
+
+```sql
+ALTER TABLE employee ENABLE ROW LEVEL SECURITY;
+ALTER TABLE salary ENABLE ROW LEVEL SECURITY;
+ALTER TABLE department ENABLE ROW LEVEL SECURITY;
+ALTER TABLE admin_users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE member_users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE owner_users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE job_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE dept_assignment ENABLE ROW LEVEL SECURITY;
+ALTER TABLE address ENABLE ROW LEVEL SECURITY;
+```
+
+After enabling, Supabase should show:
+
+```text
+RLS enabled
+```
+
+instead of:
+
+```text
+UNRESTRICTED
+```
+
+---
+
+# Recommended Phase 1 Policies
+
+Because DataMind currently uses:
+
+- custom session authentication
+- backend authorization
+- server-side service role access
+
+—the safest Phase 1 setup is:
+
+```text
+Deny all browser access.
+Allow backend-only access.
+```
+
+---
+
+## Deny-All Policies
+
+```sql
+CREATE POLICY "deny_all_employee"
+ON employee
+FOR ALL
+USING (false);
+
+CREATE POLICY "deny_all_salary"
+ON salary
+FOR ALL
+USING (false);
+
+CREATE POLICY "deny_all_department"
+ON department
+FOR ALL
+USING (false);
+
+CREATE POLICY "deny_all_admin_users"
+ON admin_users
+FOR ALL
+USING (false);
+
+CREATE POLICY "deny_all_member_users"
+ON member_users
+FOR ALL
+USING (false);
+
+CREATE POLICY "deny_all_owner_users"
+ON owner_users
+FOR ALL
+USING (false);
+
+CREATE POLICY "deny_all_audit_logs"
+ON audit_logs
+FOR ALL
+USING (false);
+```
+
+This prevents:
+
+- accidental public access
+- frontend direct-table access
+- unauthorized browser queries
+
+while still allowing:
+
+- secure backend APIs
+- service-role operations
+- governed execution workflows
+
+---
+
+# SECURITY DEFINER RPC Functions
+
+Functions used by the application should be created as:
+
+```sql
+SECURITY DEFINER
+```
+
+Examples:
+
+- verify_admin_login
+- verify_member_login
+- execute_authorized_sql
+- execute_privileged_sql
+- execute_readonly_sql
+- get_hierarchy
+
+Example:
+
+```sql
+CREATE OR REPLACE FUNCTION verify_admin_login(...)
+RETURNS boolean
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+  ...
+END;
+$$;
+```
+
+Without `SECURITY DEFINER`, RLS may block function execution.
+
+---
+
+# Environment Variable Rules
+
+## Browser / Client
+
+Safe for frontend use:
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+```
+
+---
+
+## Server Only
+
+Never expose publicly:
+
+```env
+SUPABASE_SERVICE_ROLE_KEY=
+```
+
+This key bypasses RLS.
+
+It must remain server-side only.
+
+---
+
+# Rules of Thumb
+
+1. Always hash passwords properly.
+2. Never manually type hashes.
+3. Never expose `SUPABASE_SERVICE_ROLE_KEY`.
+4. Always use SQL Editor for account operations.
+5. Keep RLS enabled on all business tables.
+6. Backend APIs should perform authorization.
+7. PostgreSQL should enforce final security.
+8. OWNER accounts are separate from employee hierarchy.
+9. OWNER passwords use application-side scrypt hashing.
+10. Browser users should never directly query protected tables.
+
+---
+
+# Final Security Model
+
+DataMind currently operates as:
+
+```text
+Natural Language
+        ↓
+Execution Planning
+        ↓
+Authorization
+        ↓
+Governance Validation
+        ↓
+PostgreSQL Enforcement
+        ↓
+Audit Logging
+```
+
+This provides:
+
+- governed database administration
+- enterprise-grade RBAC
+- auditability
+- secure backend-controlled execution
+- protected OWNER workflows
+- Supabase RLS enforcement
