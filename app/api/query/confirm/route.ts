@@ -35,6 +35,7 @@ export async function POST(req: NextRequest) {
   }
 
   const { role, employeeId } = session;
+  if (employeeId === null) return errorResponse("auth", "Owner accounts must use the OWNER control room.", 403);
 
   let body: unknown;
   try {
@@ -71,7 +72,7 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     if (err instanceof AuthorizationError) {
       console.warn("[DataMind] Authorization error on write:", err.message);
-      return errorResponse("authorization", err.message, 403);
+      return errorResponse("database", err.message, 403);
     }
     if (err instanceof DatabaseError) {
       console.error("[DataMind] Privileged execution error:", err.message);
