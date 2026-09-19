@@ -95,6 +95,11 @@ begin
     raise exception 'Multiple SQL statements are not allowed';
   end if;
 
+  if v_without_comments ~* '^\s*with\s' 
+     and v_without_comments ~* '\\y(insert|update|delete|create|alter|drop|truncate)\\y' then
+    raise exception 'WITH statements containing write or schema operations are not allowed';
+  end if;
+
   if v_without_comments !~* '^\s*(select|with|insert|update|delete|create|alter|drop|truncate)(\s|$)' then
     raise exception 'Unrecognized or disallowed OWNER statement type';
   end if;
